@@ -1,23 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_options.dart';
 import 'vehiculos_page.dart';
 import 'combustible_page.dart';
 import 'recorridos_page.dart';
 import 'mantenimiento_page.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
   runApp(const MyApp());
 }
+
+// ================== APP ==================
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -37,6 +38,8 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+
+// ================== LOGIN ==================
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -107,6 +110,7 @@ class _LoginPageState extends State<LoginPage> {
                 style: TextStyle(color: Colors.white70),
               ),
               const SizedBox(height: 40),
+
               TextField(
                 controller: _emailController,
                 style: const TextStyle(color: Colors.white),
@@ -114,9 +118,17 @@ class _LoginPageState extends State<LoginPage> {
                   labelText: 'Correo',
                   labelStyle: TextStyle(color: Colors.white70),
                   prefixIcon: Icon(Icons.email, color: Colors.white70),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white30),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
                 ),
               ),
+
               const SizedBox(height: 16),
+
               TextField(
                 controller: _passwordController,
                 obscureText: true,
@@ -125,12 +137,22 @@ class _LoginPageState extends State<LoginPage> {
                   labelText: 'Contraseña',
                   labelStyle: TextStyle(color: Colors.white70),
                   prefixIcon: Icon(Icons.lock, color: Colors.white70),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white30),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
                 ),
               ),
+
               const SizedBox(height: 10),
+
               if (_error.isNotEmpty)
                 Text(_error, style: const TextStyle(color: Colors.red)),
+
               const SizedBox(height: 20),
+
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -138,10 +160,14 @@ class _LoginPageState extends State<LoginPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: const Color(0xFF003580),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: _cargando
                       ? const CircularProgressIndicator()
-                      : const Text('Ingresar'),
+                      : const Text(
+                          'Ingresar',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                 ),
               ),
             ],
@@ -151,6 +177,8 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
+
+// ================== HOME ==================
 
 class PantallaPrincipal extends StatelessWidget {
   const PantallaPrincipal({super.key});
@@ -181,45 +209,26 @@ class PantallaPrincipal extends StatelessWidget {
           ),
         ],
       ),
+
       body: GridView.count(
         crossAxisCount: 2,
         padding: const EdgeInsets.all(16),
         crossAxisSpacing: 16,
         mainAxisSpacing: 16,
         children: [
-          _MenuCard(
-            icono: Icons.directions_car,
-            titulo: 'Vehículos',
-            pagina: VehiculosPage(),
-          ),
-          _MenuCard(
-            icono: Icons.local_gas_station,
-            titulo: 'Combustible',
-            pagina: CombustiblePage(),
-          ),
-          _MenuCard(
-            icono: Icons.map,
-            titulo: 'Recorridos',
-            pagina: RecorridosPage(),
-          ),
-          _MenuCard(
-            icono: Icons.build,
-            titulo: 'Mantenimiento',
-            pagina: MantenimientoPage(),
-          ),
-          const _MenuCard(
-            icono: Icons.car_crash,
-            titulo: 'Daños',
-          ),
-          const _MenuCard(
-            icono: Icons.people,
-            titulo: 'Usuarios',
-          ),
+          _MenuCard(icono: Icons.directions_car, titulo: 'Vehículos', pagina: VehiculosPage()),
+          _MenuCard(icono: Icons.local_gas_station, titulo: 'Combustible', pagina: CombustiblePage()),
+          _MenuCard(icono: Icons.map, titulo: 'Recorridos', pagina: RecorridosPage()),
+          _MenuCard(icono: Icons.build, titulo: 'Mantenimiento', pagina: MantenimientoPage()),
+          const _MenuCard(icono: Icons.car_crash, titulo: 'Daños'),
+          const _MenuCard(icono: Icons.people, titulo: 'Usuarios'),
         ],
       ),
     );
   }
 }
+
+// ================== CARD ==================
 
 class _MenuCard extends StatelessWidget {
   final IconData icono;

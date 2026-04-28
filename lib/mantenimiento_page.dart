@@ -1,11 +1,8 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
-'
 
 class MantenimientoPage extends StatefulWidget {
   const MantenimientoPage({super.key});
@@ -30,9 +27,9 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
 
   final picker = ImagePicker();
 
-  File? _fotoKm;
-  List<File> _fotosTrabajo = [];
-  List<File> _fotosPiezas = [];
+  XFile? _fotoKm;
+  List<XFile> _fotosTrabajo = [];
+  List<XFile> _fotosPiezas = [];
 
   final List<String> tiposTrabajo = [
     'Cambio de aceite',
@@ -47,20 +44,20 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
 
   // ================== IMÁGENES ==================
 
-  Future<File?> _seleccionarImagen() async {
-    final picked = await picker.pickImage(source: ImageSource.camera);
-    if (picked != null) return File(picked.path);
-    return null;
+  Future<XFile?> _seleccionarImagen() async {
+    return await picker.pickImage(source: ImageSource.camera);
   }
 
-  Future<List<String>> _subirImagenes(List<File> imagenes) async {
+  Future<List<String>> _subirImagenes(List<XFile> imagenes) async {
     List<String> urls = [];
 
     for (var img in imagenes) {
+      final bytes = await img.readAsBytes();
+
       final ref = FirebaseStorage.instance
           .ref('mantenimientos/${DateTime.now().millisecondsSinceEpoch}.jpg');
 
-      await ref.putFile(img);
+      await ref.putData(bytes);
       final url = await ref.getDownloadURL();
       urls.add(url);
     }
@@ -80,11 +77,12 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
             child: Column(
               children: [
 
-                // VEHÍCULO
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance.collection('vehiculos').snapshots(),
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const CircularProgressIndicator();
+                    if (!snapshot.hasData) {
+                      return const CircularProgressIndicator();
+                    }
 
                     final vehiculos = snapshot.data!.docs;
 
@@ -115,12 +113,13 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
 
                 const SizedBox(height: 10),
 
-                // TIPO DE TRABAJO
                 DropdownButton<String>(
                   value: _tipoTrabajo,
                   isExpanded: true,
-                  items: tiposTrabajo.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (val) => setStateDialog(() => _tipoTrabajo = val!),
+                  items: tiposTrabajo.map((t) =>
+                      DropdownMenuItem(value: t, child: Text(t))).toList(),
+                  onChanged: (val) =>
+                      setStateDialog(() => _tipoTrabajo = val!),
                 ),
 
                 if (_tipoTrabajo == 'Otro')
@@ -131,17 +130,18 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
 
                 const SizedBox(height: 10),
 
-                // TIPO EJECUCIÓN
                 DropdownButton<String>(
                   value: _tipoEjecucion,
                   isExpanded: true,
-                  items: tipoEjecucion.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (val) => setStateDialog(() => _tipoEjecucion = val!),
+                  items: tipoEjecucion.map((t) =>
+                      DropdownMenuItem(value: t, child: Text(t))).toList(),
+                  onChanged: (val) =>
+                      setStateDialog(() => _tipoEjecucion = val!),
                 ),
 
                 TextField(
                   controller: _responsableController,
-                  decoration: const InputDecoration(labelText: 'Responsable del traslado / supervisión'),
+                  decoration: const InputDecoration(labelText: 'Responsable'),
                 ),
 
                 TextField(
@@ -161,7 +161,9 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                 ElevatedButton(
                   onPressed: () async {
                     final img = await _seleccionarImagen();
-                    if (img != null) setStateDialog(() => _fotoKm = img);
+                    if (img != null) {
+                      setStateDialog(() => _fotoKm = img);
+                    }
                   },
                   child: const Text('Foto del kilometraje'),
                 ),
@@ -169,22 +171,27 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                 ElevatedButton(
                   onPressed: () async {
                     final img = await _seleccionarImagen();
-                    if (img != null) setStateDialog(() => _fotosTrabajo.add(img));
+                    if (img != null) {
+                      setStateDialog(() => _fotosTrabajo.add(img));
+                    }
                   },
-                  child: const Text('Agregar foto del trabajo'),
+                  child: const Text('Foto del trabajo'),
                 ),
 
                 ElevatedButton(
                   onPressed: () async {
                     final img = await _seleccionarImagen();
-                    if (img != null) setStateDialog(() => _fotosPiezas.add(img));
+                    if (img != null) {
+                      setStateDialog(() => _fotosPiezas.add(img));
+                    }
                   },
-                  child: const Text('Agregar foto de piezas'),
+                  child: const Text('Foto de piezas'),
                 ),
               ],
             ),
           ),
           actions: [
+
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancelar'),
@@ -193,19 +200,13 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
             ElevatedButton(
               onPressed: () async {
 
-                // VALIDACIONES
                 if (_vehiculoSeleccionado == null) {
-                  _mostrarError('Seleccione un vehículo');
+                  _mostrarError('Seleccione vehículo');
                   return;
                 }
 
                 if (_fotoKm == null) {
-                  _mostrarError('Debe tomar foto del kilometraje');
-                  return;
-                }
-
-                if (_tipoTrabajo == 'Otro' && _descripcionController.text.isEmpty) {
-                  _mostrarError('Debe describir el trabajo');
+                  _mostrarError('Debe tomar foto del km');
                   return;
                 }
 
@@ -244,12 +245,9 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
   }
 
   void _mostrarError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
   }
-
-  // ================== VISUALIZACIÓN ==================
 
   void _verDetalle(Map<String, dynamic> data) {
     Navigator.push(
@@ -275,7 +273,10 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
         child: const Icon(Icons.add),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('mantenimientos').orderBy('fecha', descending: true).snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('mantenimientos')
+            .orderBy('fecha', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
 
           if (!snapshot.hasData) {
