@@ -1,16 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'vehiculos_page.dart';
 import 'combustible_page.dart';
 import 'recorridos_page.dart';
 import 'mantenimiento_page.dart';
+import 'usuario_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp());
+  runApp(
+    MultiProvider(
+      providers: [ChangeNotifierProvider(create: (_) => UsuarioProvider())],
+      child: const MyApp(),
+    ),
+  );
 }
 
 // ─── PALETA INSTITUCIONAL ─────────────────────────────────────────────────────
@@ -62,10 +71,28 @@ class _LoginPageState extends State<LoginPage> {
       _error = '';
     });
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+      final userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text.trim(),
+          );
+      if (!mounted) return;
+
+      // 2. Obtener rol desde Firestore
+      final doc = await FirebaseFirestore.instance
+          .collection('admins')
+          .doc(userCredential.user?.uid)
+          .get();
+
+      if (!mounted) return;
+
+      final usuarioProvider = Provider.of<UsuarioProvider>(
+        context,
+        listen: false,
       );
+
+      usuarioProvider.setUsuario(_emailController.text.trim(), doc.exists);
+
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -77,9 +104,11 @@ class _LoginPageState extends State<LoginPage> {
         _error = 'Correo o contraseña incorrectos';
       });
     } finally {
-      setState(() {
-        _cargando = false;
-      });
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -456,6 +485,8 @@ class PantallaPrincipal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final usuarioProvider = Provider.of<UsuarioProvider>(context);
+
     return Scaffold(
       backgroundColor: kSurface,
 
@@ -586,20 +617,24 @@ class PantallaPrincipal extends StatelessWidget {
 
           // ── Grid de módulos ───────────────────────────────────────────────
           Expanded(
-            child: GridView.count(
-              crossAxisCount: 2,
+            child: GridView(
               padding: const EdgeInsets.all(16),
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              childAspectRatio: 0.95,
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent:
+                    170, // ✅ Ancho máximo de cada tarjeta (píxeles)
+                childAspectRatio: 0.95, // Proporción alto/ancho
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+              ),
               children: [
-                _ModuloCard(
-                  icono: Icons.directions_car_rounded,
-                  titulo: 'Vehículos',
-                  descripcion: 'Registro y control',
-                  color: const Color(0xFF0050C8),
-                  pagina: VehiculosPage(),
-                ),
+                if (usuarioProvider.isAdmin)
+                  _ModuloCard(
+                    icono: Icons.directions_car_rounded,
+                    titulo: 'Vehículos',
+                    descripcion: 'Registro y control',
+                    color: const Color(0xFF0050C8),
+                    pagina: VehiculosPage(),
+                  ),
                 _ModuloCard(
                   icono: Icons.local_gas_station_rounded,
                   titulo: 'Combustible',
@@ -627,12 +662,12 @@ class PantallaPrincipal extends StatelessWidget {
                   descripcion: 'Incidentes y daños',
                   color: Color(0xFFC62828),
                 ),
-                const _ModuloCard(
-                  icono: Icons.manage_accounts_rounded,
-                  titulo: 'Usuarios',
-                  descripcion: 'Acceso y permisos',
-                  color: Color(0xFF00695C),
-                ),
+                // const _ModuloCard(
+                //   icono: Icons.manage_accounts_rounded,
+                //   titulo: 'Usuarios',
+                //   descripcion: 'Acceso y permisos',
+                //   color: Color(0xFF00695C),
+                // ),
               ],
             ),
           ),

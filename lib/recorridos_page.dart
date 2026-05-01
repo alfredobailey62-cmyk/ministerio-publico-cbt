@@ -32,51 +32,132 @@ class _RecorridosPageState extends State<RecorridosPage> {
   bool _recorridoActivo = false;
   String? _recorridoIdActivo; // ID del recorrido activo para actualizar después
 
-  // Coordenadas de referencia (Empalme)
-  static const double empalmeLat = 9.5000;
-  static const double empalmeLng = -82.5000;
 
   // ========== FUNCIONES DE GPS ==========
-  
+
   Future<bool> _iniciarGPS() async {
     print('🟢 Iniciando GPS...');
-    
+
+    // 1. Verificar si el servicio de ubicación está activado
     bool servicioActivo = await Geolocator.isLocationServiceEnabled();
     if (!servicioActivo) {
       print('❌ GPS no activado');
-      _mostrarSnackbar('Active el GPS para continuar');
-      return false;
+      _mostrarSnackbar('Active el GPS del dispositivo');
+
+      // Opcional: Abrir configuración de ubicación
+      bool? abrirConfiguracion = await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Ubicación desactivada'),
+          content: const Text('Active la ubicación para usar esta función'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await Geolocator.openLocationSettings();
+                Navigator.pop(context, true);
+              },
+              child: const Text('Configurar'),
+            ),
+          ],
+        ),
+      );
+
+      if (abrirConfiguracion != true) return false;
+
+      // Verificar de nuevo
+      servicioActivo = await Geolocator.isLocationServiceEnabled();
+      if (!servicioActivo) return false;
     }
 
+    // 2. Verificar y solicitar permisos
     LocationPermission permiso = await Geolocator.checkPermission();
+
     if (permiso == LocationPermission.denied) {
+      print('📱 Solicitando permiso de ubicación...');
       permiso = await Geolocator.requestPermission();
+
       if (permiso == LocationPermission.denied) {
-        print('❌ Permiso denegado');
+        print('❌ Permiso denegado por el usuario');
         _mostrarSnackbar('Se necesita permiso de ubicación');
+
+        // Mostrar explicación
+        await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Permiso necesario'),
+            content: const Text(
+              'La app necesita acceso a tu ubicación para grabar los recorridos',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
         return false;
       }
     }
 
-    _puntosGPS.clear();
-    print('✅ GPS iniciado, grabando puntos...');
+    if (permiso == LocationPermission.deniedForever) {
+      print('❌ Permiso denegado permanentemente');
+      _mostrarSnackbar('Permiso de ubicación denegado permanentemente');
 
-    _posicionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 1, // Cada 5 metros
-      ),
-    ).listen((Position position) {
-      final punto = {
-        'lat': position.latitude,
-        'lng': position.longitude,
-        'hora': DateTime.now().toIso8601String(),
-      };
-      _puntosGPS.add(punto);
-      print('📍 Punto grabado #${_puntosGPS.length}: ${position.latitude}, ${position.longitude}');
-    });
+      // Abrir configuración de la app
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Permiso denegado'),
+          content: const Text(
+            'Habilitá el permiso de ubicación desde configuración',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await Geolocator.openAppSettings();
+                Navigator.pop(context);
+              },
+              child: const Text('Abrir configuración'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
+    // 3. Todo ok, iniciar GPS
+    print('✅ Permisos concedidos, iniciando GPS...');
+    _puntosGPS.clear();
+
+    _posicionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 5,
+          ),
+        ).listen((Position position) {
+          final punto = {
+            'lat': position.latitude,
+            'lng': position.longitude,
+            'hora': DateTime.now().toIso8601String(),
+          };
+          _puntosGPS.add(punto);
+          print(
+            '📍 Punto #${_puntosGPS.length}: ${position.latitude}, ${position.longitude}',
+          );
+        });
 
     setState(() => _recorridoActivo = true);
+    _mostrarSnackbar('GPS activado - Grabando recorrido');
     return true;
   }
 
@@ -87,21 +168,8 @@ class _RecorridosPageState extends State<RecorridosPage> {
     setState(() => _recorridoActivo = false);
   }
 
-  bool pasoPorEmpalme(List<Map<String, dynamic>> puntos) {
-    const double rango = 0.02;
-    for (var p in puntos) {
-      if ((p['lat'] - empalmeLat).abs() < rango &&
-          (p['lng'] - empalmeLng).abs() < rango) {
-        print('✅ PASÓ POR EMPALME');
-        return true;
-      }
-    }
-    print('❌ NO pasó por empalme');
-    return false;
-  }
-
   // ========== PASO 1: CREAR RECORRIDO (SOLO km_inicio) ==========
-  
+
   void _mostrarFormularioInicio() {
     // Limpiar formulario
     _kmInicioController.clear();
@@ -123,7 +191,9 @@ class _RecorridosPageState extends State<RecorridosPage> {
               children: [
                 // Selector de vehículo
                 StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('vehiculos').snapshots(),
+                  stream: FirebaseFirestore.instance
+                      .collection('vehiculos')
+                      .snapshots(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) {
                       return const CircularProgressIndicator();
@@ -137,7 +207,9 @@ class _RecorridosPageState extends State<RecorridosPage> {
                         final data = v.data() as Map<String, dynamic>;
                         return DropdownMenuItem(
                           value: v.id,
-                          child: Text('${data['placa']} - ${data['marca']} ${data['modelo']}'),
+                          child: Text(
+                            '${data['placa']} - ${data['marca']} ${data['modelo']}',
+                          ),
                         );
                       }).toList(),
                       onChanged: (val) {
@@ -152,14 +224,28 @@ class _RecorridosPageState extends State<RecorridosPage> {
                     );
                   },
                 ),
-                TextField(controller: _conductorController, decoration: const InputDecoration(labelText: 'Conductor')),
-                TextField(controller: _fiscaliaController, decoration: const InputDecoration(labelText: 'Fiscalía')),
-                TextField(controller: _carpetaController, decoration: const InputDecoration(labelText: 'Carpeta')),
-                TextField(controller: _diligenciaController, decoration: const InputDecoration(labelText: 'Diligencia')),
+                TextField(
+                  controller: _conductorController,
+                  decoration: const InputDecoration(labelText: 'Conductor'),
+                ),
+                TextField(
+                  controller: _fiscaliaController,
+                  decoration: const InputDecoration(labelText: 'Fiscalía'),
+                ),
+                TextField(
+                  controller: _carpetaController,
+                  decoration: const InputDecoration(labelText: 'Carpeta'),
+                ),
+                TextField(
+                  controller: _diligenciaController,
+                  decoration: const InputDecoration(labelText: 'Diligencia'),
+                ),
                 TextField(
                   controller: _kmInicioController,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Kilometraje inicial *'),
+                  decoration: const InputDecoration(
+                    labelText: 'Kilometraje inicial *',
+                  ),
                 ),
               ],
             ),
@@ -172,19 +258,21 @@ class _RecorridosPageState extends State<RecorridosPage> {
             ElevatedButton(
               onPressed: () async {
                 final kmInicio = int.tryParse(_kmInicioController.text);
-                
+
                 if (kmInicio == null) {
                   _mostrarSnackbar('Ingrese el kilometraje inicial');
                   return;
                 }
-                
+
                 if (_vehiculoSeleccionado == null) {
                   _mostrarSnackbar('Seleccione un vehículo');
                   return;
                 }
 
-                print('📝 PASO 1: Guardando recorrido con km_inicio: $kmInicio');
-                
+                print(
+                  '📝 PASO 1: Guardando recorrido con km_inicio: $kmInicio',
+                );
+
                 // INICIAR GPS AUTOMÁTICAMENTE
                 bool gpsIniciado = await _iniciarGPS();
                 if (!gpsIniciado) {
@@ -193,25 +281,26 @@ class _RecorridosPageState extends State<RecorridosPage> {
                 }
 
                 // Guardar en Firestore con km_fin = null
-                final docRef = await FirebaseFirestore.instance.collection('recorridos').add({
-                  'vehiculo_id': _vehiculoSeleccionado,
-                  'placa': _placaSeleccionada,
-                  'vehiculo': _marcaModelo,
-                  'conductor': _conductorController.text,
-                  'fiscalia': _fiscaliaController.text,
-                  'carpeta': _carpetaController.text,
-                  'diligencia': _diligenciaController.text,
-                  'km_inicio': kmInicio,
-                  'km_fin': null, // PENDIENTE
-                  'km_recorrido': null, // PENDIENTE
-                  'fecha_inicio': DateTime.now(),
-                  'fecha_fin': null, // PENDIENTE
-                  'mes': DateTime.now().month,
-                  'anio': DateTime.now().year,
-                  'puntos_gps': [], // Se irán llenando con el stream
-                  'fue_empalme': false, // Se actualizará al finalizar
-                  'estado': 'en_curso', // NUEVO CAMPO
-                });
+                final docRef = await FirebaseFirestore.instance
+                    .collection('recorridos')
+                    .add({
+                      'vehiculo_id': _vehiculoSeleccionado,
+                      'placa': _placaSeleccionada,
+                      'vehiculo': _marcaModelo,
+                      'conductor': _conductorController.text,
+                      'fiscalia': _fiscaliaController.text,
+                      'carpeta': _carpetaController.text,
+                      'diligencia': _diligenciaController.text,
+                      'km_inicio': kmInicio,
+                      'km_fin': null, // PENDIENTE
+                      'km_recorrido': null, // PENDIENTE
+                      'fecha_inicio': DateTime.now(),
+                      'fecha_fin': null, // PENDIENTE
+                      'mes': DateTime.now().month,
+                      'anio': DateTime.now().year,
+                      'puntos_gps': [], // Se irán llenando con el stream
+                      'estado': 'en_curso', // NUEVO CAMPO
+                    });
 
                 setState(() {
                   _recorridoIdActivo = docRef.id;
@@ -219,7 +308,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
 
                 print('✅ Recorrido creado con ID: $_recorridoIdActivo');
                 _mostrarSnackbar('Recorrido iniciado. GPS activo.');
-                
+
                 if (context.mounted) {
                   Navigator.pop(context);
                 }
@@ -233,10 +322,13 @@ class _RecorridosPageState extends State<RecorridosPage> {
   }
 
   // ========== PASO 2: FINALIZAR RECORRIDO (SOLO km_fin) ==========
-  
-  void _mostrarFormularioFinalizacion(String recorridoId, Map<String, dynamic> recorridoActual) {
+
+  void _mostrarFormularioFinalizacion(
+    String recorridoId,
+    Map<String, dynamic> recorridoActual,
+  ) {
     _kmFinController.clear();
-    
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -244,14 +336,18 @@ class _RecorridosPageState extends State<RecorridosPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Vehículo: ${recorridoActual['placa']} - ${recorridoActual['vehiculo']}'),
+            Text(
+              'Vehículo: ${recorridoActual['placa']} - ${recorridoActual['vehiculo']}',
+            ),
             Text('Conductor: ${recorridoActual['conductor']}'),
             Text('Kilometraje inicial: ${recorridoActual['km_inicio']} km'),
             const SizedBox(height: 16),
             TextField(
               controller: _kmFinController,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Kilometraje final *'),
+              decoration: const InputDecoration(
+                labelText: 'Kilometraje final *',
+              ),
             ),
           ],
         ),
@@ -263,48 +359,51 @@ class _RecorridosPageState extends State<RecorridosPage> {
           ElevatedButton(
             onPressed: () async {
               final kmFin = int.tryParse(_kmFinController.text);
-              
+
               if (kmFin == null) {
                 _mostrarSnackbar('Ingrese el kilometraje final');
                 return;
               }
-              
+
               final kmInicio = recorridoActual['km_inicio'] as int;
               if (kmFin <= kmInicio) {
-                _mostrarSnackbar('El kilometraje final debe ser mayor al inicial');
+                _mostrarSnackbar(
+                  'El kilometraje final debe ser mayor al inicial',
+                );
                 return;
               }
 
               print('📝 PASO 2: Finalizando recorrido con km_fin: $kmFin');
-              
+
               // DETENER GPS
               await _detenerGPS();
-              
+
               // Calcular datos finales
               final kmRecorrido = kmFin - kmInicio;
-              final fueEmpalme = pasoPorEmpalme(_puntosGPS);
-              
+
               print('📍 Puntos GPS totales: ${_puntosGPS.length}');
               print('📊 KM recorrido: $kmRecorrido');
-              
+
               // ACTUALIZAR el registro existente
-              await FirebaseFirestore.instance.collection('recorridos').doc(recorridoId).update({
-                'km_fin': kmFin,
-                'km_recorrido': kmRecorrido,
-                'fecha_fin': DateTime.now(),
-                'puntos_gps': _puntosGPS,
-                'fue_empalme': fueEmpalme,
-                'estado': 'completado',
-              });
-              
+              await FirebaseFirestore.instance
+                  .collection('recorridos')
+                  .doc(recorridoId)
+                  .update({
+                    'km_fin': kmFin,
+                    'km_recorrido': kmRecorrido,
+                    'fecha_fin': DateTime.now(),
+                    'puntos_gps': _puntosGPS,
+                    'estado': 'completado',
+                  });
+
               // Limpiar estado
               setState(() {
                 _recorridoIdActivo = null;
                 _puntosGPS = [];
               });
-              
+
               _mostrarSnackbar('Recorrido finalizado y guardado');
-              
+
               if (context.mounted) {
                 Navigator.pop(context);
               }
@@ -317,14 +416,14 @@ class _RecorridosPageState extends State<RecorridosPage> {
   }
 
   // ========== VER MAPA ==========
-  
+
   void _verMapa(Map<String, dynamic> recorrido) {
     final puntos = (recorrido['puntos_gps'] as List<dynamic>? ?? []);
     if (puntos.isEmpty) {
       _mostrarSnackbar('Este recorrido no tiene puntos GPS registrados');
       return;
     }
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -338,11 +437,11 @@ class _RecorridosPageState extends State<RecorridosPage> {
   }
 
   // ========== UTILIDADES ==========
-  
+
   void _mostrarSnackbar(String mensaje) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(mensaje)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(mensaje)));
   }
 
   void _cancelarRecorridoActivo() async {
@@ -351,7 +450,9 @@ class _RecorridosPageState extends State<RecorridosPage> {
         context: context,
         builder: (_) => AlertDialog(
           title: const Text('Cancelar Recorrido'),
-          content: const Text('¿Está seguro que desea cancelar el recorrido activo? Se perderán todos los datos.'),
+          content: const Text(
+            '¿Está seguro que desea cancelar el recorrido activo? Se perderán todos los datos.',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -360,7 +461,10 @@ class _RecorridosPageState extends State<RecorridosPage> {
             TextButton(
               onPressed: () async {
                 await _detenerGPS();
-                await FirebaseFirestore.instance.collection('recorridos').doc(_recorridoIdActivo).delete();
+                await FirebaseFirestore.instance
+                    .collection('recorridos')
+                    .doc(_recorridoIdActivo)
+                    .delete();
                 setState(() {
                   _recorridoIdActivo = null;
                   _puntosGPS = [];
@@ -399,9 +503,15 @@ class _RecorridosPageState extends State<RecorridosPage> {
               backgroundColor: Colors.red,
               onPressed: () async {
                 if (_recorridoIdActivo != null) {
-                  final doc = await FirebaseFirestore.instance.collection('recorridos').doc(_recorridoIdActivo).get();
+                  final doc = await FirebaseFirestore.instance
+                      .collection('recorridos')
+                      .doc(_recorridoIdActivo)
+                      .get();
                   if (doc.exists) {
-                    _mostrarFormularioFinalizacion(_recorridoIdActivo!, doc.data()!);
+                    _mostrarFormularioFinalizacion(
+                      _recorridoIdActivo!,
+                      doc.data()!,
+                    );
                   }
                 }
               },
@@ -439,7 +549,10 @@ class _RecorridosPageState extends State<RecorridosPage> {
                       child: DropdownButton<int>(
                         value: _mesFiltro,
                         items: List.generate(12, (i) => i + 1).map((m) {
-                          return DropdownMenuItem(value: m, child: Text(_getMesNombre(m)));
+                          return DropdownMenuItem(
+                            value: m,
+                            child: Text(_getMesNombre(m)),
+                          );
                         }).toList(),
                         onChanged: (v) => setState(() => _mesFiltro = v!),
                       ),
@@ -448,7 +561,10 @@ class _RecorridosPageState extends State<RecorridosPage> {
                       child: DropdownButton<int>(
                         value: _anioFiltro,
                         items: [2023, 2024, 2025, 2026].map((a) {
-                          return DropdownMenuItem(value: a, child: Text(a.toString()));
+                          return DropdownMenuItem(
+                            value: a,
+                            child: Text(a.toString()),
+                          );
                         }).toList(),
                         onChanged: (v) => setState(() => _anioFiltro = v!),
                       ),
@@ -464,7 +580,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                     final r = recorridos[i].data() as Map<String, dynamic>;
                     final estado = r['estado'] ?? 'completado';
                     final estaActivo = estado == 'en_curso';
-                    
+
                     return Card(
                       color: estaActivo ? Colors.yellow[100] : null,
                       child: ListTile(
@@ -473,19 +589,24 @@ class _RecorridosPageState extends State<RecorridosPage> {
                           'Inicio: ${r['km_inicio']} km\n'
                           'Fin: ${r['km_fin'] ?? "Pendiente"} km\n'
                           'Recorrido: ${r['km_recorrido'] ?? "En curso"} km\n'
-                          'Estado: ${estaActivo ? "🟡 EN CURSO" : "✅ COMPLETADO"}\n'
-                          'Destino: ${r['fue_empalme'] == true ? "✅ Empalme" : "❌ No registrado"}',
+                          'Estado: ${estaActivo ? "EN CURSO" : "COMPLETADO"}\n'
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (estaActivo)
                               ElevatedButton(
-                                onPressed: () => _mostrarFormularioFinalizacion(recorridos[i].id, r),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                                onPressed: () => _mostrarFormularioFinalizacion(
+                                  recorridos[i].id,
+                                  r,
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                ),
                                 child: const Text('Finalizar'),
                               ),
-                            if (!estaActivo && (r['puntos_gps'] as List?)?.isNotEmpty == true)
+                            if (!estaActivo &&
+                                (r['puntos_gps'] as List?)?.isNotEmpty == true)
                               IconButton(
                                 icon: const Icon(Icons.map),
                                 onPressed: () => _verMapa(r),
@@ -503,9 +624,22 @@ class _RecorridosPageState extends State<RecorridosPage> {
       ),
     );
   }
-  
+
   String _getMesNombre(int mes) {
-    const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const meses = [
+      'Ene',
+      'Feb',
+      'Mar',
+      'Abr',
+      'May',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dic',
+    ];
     return meses[mes - 1];
   }
 }
@@ -535,33 +669,35 @@ class _MapaRecorrido extends StatelessWidget {
         backgroundColor: const Color(0xFF003580),
       ),
       body: FlutterMap(
-        options: MapOptions(
-          initialCenter: centro,
-          initialZoom: 13,
-        ),
+        options: MapOptions(initialCenter: centro, initialZoom: 13),
         children: [
           TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.example.ministerio_publico_cbt'
           ),
           if (puntos.isNotEmpty) ...[
             PolylineLayer(
               polylines: [
-                Polyline(
-                  points: puntos,
-                  strokeWidth: 4,
-                  color: Colors.blue,
-                ),
+                Polyline(points: puntos, strokeWidth: 4, color: Colors.blue),
               ],
             ),
             MarkerLayer(
               markers: [
                 Marker(
                   point: puntos.first,
-                  child: const Icon(Icons.location_on, color: Colors.green, size: 40),
+                  child: const Icon(
+                    Icons.location_on,
+                    color: Colors.green,
+                    size: 40,
+                  ),
                 ),
                 Marker(
                   point: puntos.last,
-                  child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                  child: const Icon(
+                    Icons.location_on,
+                    color: Colors.red,
+                    size: 40,
+                  ),
                 ),
               ],
             ),
