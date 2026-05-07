@@ -620,9 +620,8 @@ class PantallaPrincipal extends StatelessWidget {
             child: GridView(
               padding: const EdgeInsets.all(16),
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent:
-                    170, // ✅ Ancho máximo de cada tarjeta (píxeles)
-                childAspectRatio: 0.95, // Proporción alto/ancho
+                maxCrossAxisExtent: 200,
+                childAspectRatio: 0.95,
                 crossAxisSpacing: 14,
                 mainAxisSpacing: 14,
               ),
