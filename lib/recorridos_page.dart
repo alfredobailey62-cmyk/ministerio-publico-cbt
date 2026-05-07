@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class RecorridosPage extends StatefulWidget {
   const RecorridosPage({super.key});
@@ -15,10 +17,7 @@ class RecorridosPage extends StatefulWidget {
 class _RecorridosPageState extends State<RecorridosPage> {
   final _kmInicioController = TextEditingController();
   final _kmFinController = TextEditingController();
-  final _fiscaliaController = TextEditingController();
-  final _diligenciaController = TextEditingController();
   final _conductorController = TextEditingController();
-  final _carpetaController = TextEditingController();
 
   String? _vehiculoSeleccionado;
   String? _placaSeleccionada;
@@ -29,7 +28,6 @@ class _RecorridosPageState extends State<RecorridosPage> {
   bool _recorridoActivo = false;
   String? _recorridoIdActivo;
 
-  // Configuración para detección de paradas
   Position? _ultimaPosicion;
   DateTime? _inicioParada;
   bool _enParada = false;
@@ -38,56 +36,126 @@ class _RecorridosPageState extends State<RecorridosPage> {
   static const double DISTANCIA_PARADA = 5.0;
   static const int TIEMPO_PARADA_MINUTOS = 5;
 
-  // ========== FUNCIONES DE GPS ==========
+  SharedPreferences? _prefs;
 
-  Future<bool> _iniciarGPS() async {
-    print('🟢 Iniciando GPS...');
+  @override
+  void initState() {
+    super.initState();
+    _cargarRecorridoActivo();
+  }
 
-    bool servicioActivo = await Geolocator.isLocationServiceEnabled();
-    if (!servicioActivo) {
-      _mostrarSnackbar('Active el GPS del dispositivo');
-      return false;
+  Future<void> _cargarRecorridoActivo() async {
+    _prefs = await SharedPreferences.getInstance();
+    final recorridoGuardado = _prefs?.getString('recorrido_activo_id');
+    final puntosGuardados = _prefs?.getString('puntos_activos');
+    
+    if (recorridoGuardado != null) {
+      setState(() {
+        _recorridoIdActivo = recorridoGuardado;
+        _recorridoActivo = true;
+      });
+      
+      if (puntosGuardados != null) {
+        final puntos = json.decode(puntosGuardados) as List;
+        _puntosGPS = puntos.map((e) => Map<String, dynamic>.from(e)).toList();
+        print('Recorrido activo recuperado: ${_puntosGPS.length} puntos');
+      }
+      
+      _reanudarGPS();
     }
+  }
+
+  Future<void> _guardarRecorridoEnBackground() async {
+    if (_recorridoIdActivo != null) {
+      await _prefs?.setString('recorrido_activo_id', _recorridoIdActivo!);
+      await _prefs?.setString('puntos_activos', json.encode(_puntosGPS));
+    }
+  }
+
+  Future<void> _reanudarGPS() async {
+    bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+    if (!servicioActivo) return;
 
     LocationPermission permiso = await Geolocator.checkPermission();
-
-    if (permiso == LocationPermission.denied) {
+    if (permiso != LocationPermission.always && permiso != LocationPermission.whileInUse) {
       permiso = await Geolocator.requestPermission();
-      if (permiso == LocationPermission.denied) {
-        _mostrarSnackbar('Se necesita permiso de ubicación');
-        return false;
+      if (permiso != LocationPermission.always && permiso != LocationPermission.whileInUse) {
+        return;
       }
     }
-
-    if (permiso == LocationPermission.deniedForever) {
-      _mostrarSnackbar('Permiso de ubicación denegado permanentemente');
-      return false;
-    }
-
-    _puntosGPS.clear();
-    _ultimaPosicion = null;
-    _inicioParada = null;
-    _enParada = false;
-    _puntosParada.clear();
 
     _posicionStream = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.bestForNavigation,
         distanceFilter: 5,
       ),
-    ).listen((Position position) {
+    ).listen((Position position) async {
       final punto = {
         'lat': position.latitude,
         'lng': position.longitude,
         'hora': DateTime.now().toIso8601String(),
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
+      
       _puntosGPS.add(punto);
+      await _guardarRecorridoEnBackground();
       _detectarParada(position);
+      
+      try {
+        if (_recorridoIdActivo != null) {
+          await FirebaseFirestore.instance
+              .collection('recorridos')
+              .doc(_recorridoIdActivo)
+              .collection('puntos_gps')
+              .add(punto);
+        }
+      } catch (e) {
+        await _guardarPuntoOffline(punto);
+      }
     });
+  }
 
-    setState(() => _recorridoActivo = true);
-    _mostrarSnackbar('GPS activado - Grabando recorrido');
-    return true;
+  Future<void> _guardarPuntoOffline(Map<String, dynamic> punto) async {
+    final prefs = await SharedPreferences.getInstance();
+    final puntosString = prefs.getString('puntos_pendientes');
+    List<Map<String, dynamic>> puntosPendientes = [];
+    
+    if (puntosString != null) {
+      puntosPendientes = (json.decode(puntosString) as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+    
+    puntosPendientes.add(punto);
+    await prefs.setString('puntos_pendientes', json.encode(puntosPendientes));
+    print('Punto guardado offline: ${puntosPendientes.length} pendientes');
+  }
+
+  Future<void> _sincronizarPuntosOffline() async {
+    final prefs = await SharedPreferences.getInstance();
+    final puntosString = prefs.getString('puntos_pendientes');
+    
+    if (puntosString != null && _recorridoIdActivo != null) {
+      final puntosPendientes = (json.decode(puntosString) as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      
+      for (var punto in puntosPendientes) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('recorridos')
+              .doc(_recorridoIdActivo)
+              .collection('puntos_gps')
+              .add(punto);
+        } catch (e) {
+          print('Error sincronizando punto: $e');
+          return;
+        }
+      }
+      
+      await prefs.remove('puntos_pendientes');
+      print('Sincronizados ${puntosPendientes.length} puntos');
+    }
   }
 
   void _detectarParada(Position posicionActual) {
@@ -109,6 +177,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
             'lng': posicionActual.longitude,
             'hora': DateTime.now().toIso8601String(),
           });
+          print('Inicio de parada detectado');
         } else {
           _puntosParada.add({
             'lat': posicionActual.latitude,
@@ -130,6 +199,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
           _enParada = false;
           _inicioParada = null;
           _puntosParada.clear();
+          print('Vehiculo en movimiento');
         }
       }
     }
@@ -138,23 +208,91 @@ class _RecorridosPageState extends State<RecorridosPage> {
 
   Future<void> _registrarParada() async {
     if (_recorridoIdActivo == null || _puntosParada.isEmpty) return;
+    if (_inicioParada == null) return;
     
     double avgLat = _puntosParada.map((p) => p['lat'] as double).reduce((a, b) => a + b) / _puntosParada.length;
     double avgLng = _puntosParada.map((p) => p['lng'] as double).reduce((a, b) => a + b) / _puntosParada.length;
     
     final duracion = DateTime.now().difference(_inicioParada!).inMinutes;
     
-    await FirebaseFirestore.instance
-        .collection('recorridos')
-        .doc(_recorridoIdActivo)
-        .collection('paradas')
-        .add({
-      'ubicacion': GeoPoint(avgLat, avgLng),
-      'inicio': _inicioParada,
-      'fin': DateTime.now(),
-      'duracion_minutos': duracion,
-      'puntos': _puntosParada,
+    try {
+      await FirebaseFirestore.instance
+          .collection('recorridos')
+          .doc(_recorridoIdActivo)
+          .collection('paradas')
+          .add({
+        'ubicacion': GeoPoint(avgLat, avgLng),
+        'inicio': _inicioParada,
+        'fin': DateTime.now(),
+        'duracion_minutos': duracion,
+        'puntos': _puntosParada,
+      });
+      print('Parada registrada: $duracion minutos');
+    } catch (e) {
+      print('Error registrando parada: $e');
+    }
+  }
+
+  Future<bool> _iniciarGPS() async {
+    bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+    if (!servicioActivo) {
+      _mostrarSnackbar('Active el GPS del dispositivo');
+      return false;
+    }
+
+    LocationPermission permiso = await Geolocator.checkPermission();
+
+    if (permiso == LocationPermission.denied) {
+      permiso = await Geolocator.requestPermission();
+      if (permiso == LocationPermission.denied) {
+        _mostrarSnackbar('Se necesita permiso de ubicacion');
+        return false;
+      }
+    }
+
+    if (permiso == LocationPermission.deniedForever) {
+      _mostrarSnackbar('Permiso de ubicacion denegado permanentemente');
+      return false;
+    }
+
+    _puntosGPS.clear();
+    _ultimaPosicion = null;
+    _inicioParada = null;
+    _enParada = false;
+    _puntosParada.clear();
+
+    _posicionStream = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 5,
+      ),
+    ).listen((Position position) async {
+      final punto = {
+        'lat': position.latitude,
+        'lng': position.longitude,
+        'hora': DateTime.now().toIso8601String(),
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      _puntosGPS.add(punto);
+      await _guardarRecorridoEnBackground();
+      _detectarParada(position);
+      
+      try {
+        if (_recorridoIdActivo != null) {
+          await FirebaseFirestore.instance
+              .collection('recorridos')
+              .doc(_recorridoIdActivo)
+              .collection('puntos_gps')
+              .add(punto);
+        }
+      } catch (e) {
+        await _guardarPuntoOffline(punto);
+      }
     });
+
+    setState(() => _recorridoActivo = true);
+    _mostrarSnackbar('GPS activado - Grabando recorrido');
+    return true;
   }
 
   Future<void> _detenerGPS() async {
@@ -165,17 +303,15 @@ class _RecorridosPageState extends State<RecorridosPage> {
       }
     }
     await _posicionStream?.cancel();
+    await _sincronizarPuntosOffline();
+    await _prefs?.remove('recorrido_activo_id');
+    await _prefs?.remove('puntos_activos');
     setState(() => _recorridoActivo = false);
   }
 
-  // ========== PASO 1: CREAR RECORRIDO ==========
-
   void _mostrarFormularioInicio() {
     _kmInicioController.clear();
-    _fiscaliaController.clear();
-    _diligenciaController.clear();
     _conductorController.clear();
-    _carpetaController.clear();
     _vehiculoSeleccionado = null;
 
     showDialog(
@@ -196,7 +332,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                       final vehiculos = snapshot.data!.docs;
                       return DropdownButtonFormField<String>(
                         isExpanded: true,
-                        hint: const Text('Seleccione vehículo'),
+                        hint: const Text('Seleccione vehiculo'),
                         value: _vehiculoSeleccionado,
                         items: vehiculos.map((v) {
                           final data = v.data() as Map<String, dynamic>;
@@ -215,7 +351,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                           });
                         },
                         decoration: const InputDecoration(
-                          labelText: 'Vehículo *',
+                          labelText: 'Vehiculo',
                           border: OutlineInputBorder(),
                         ),
                       );
@@ -225,7 +361,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                   TextField(
                     controller: _conductorController,
                     decoration: const InputDecoration(
-                      labelText: 'Conductor *',
+                      labelText: 'Conductor',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -234,7 +370,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                     controller: _kmInicioController,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
-                      labelText: 'Kilometraje inicial *',
+                      labelText: 'Kilometraje inicial',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -258,6 +394,8 @@ class _RecorridosPageState extends State<RecorridosPage> {
                 bool gpsIniciado = await _iniciarGPS();
                 if (!gpsIniciado) return;
 
+                final fechaHoraInicio = DateTime.now();
+                
                 final docRef = await FirebaseFirestore.instance.collection('recorridos').add({
                   'vehiculo_id': _vehiculoSeleccionado,
                   'placa': _placaSeleccionada,
@@ -266,26 +404,26 @@ class _RecorridosPageState extends State<RecorridosPage> {
                   'km_inicio': kmInicio,
                   'km_fin': null,
                   'km_recorrido': null,
-                  'fecha_inicio': DateTime.now(),
+                  'fecha_inicio': fechaHoraInicio,
+                  'fecha_inicio_str': '${fechaHoraInicio.day}/${fechaHoraInicio.month}/${fechaHoraInicio.year} ${fechaHoraInicio.hour}:${fechaHoraInicio.minute}:${fechaHoraInicio.second}',
                   'fecha_fin': null,
-                  'mes': DateTime.now().month,
-                  'anio': DateTime.now().year,
+                  'mes': fechaHoraInicio.month,
+                  'anio': fechaHoraInicio.year,
                   'estado': 'en_curso',
                 });
 
                 setState(() => _recorridoIdActivo = docRef.id);
-                _mostrarSnackbar('Recorrido iniciado');
+                await _guardarRecorridoEnBackground();
+                _mostrarSnackbar('Recorrido iniciado a las ${fechaHoraInicio.hour}:${fechaHoraInicio.minute}');
                 if (context.mounted) Navigator.pop(context);
               },
-              child: const Text('Iniciar'),
+              child: const Text('Iniciar Recorrido'),
             ),
           ],
         ),
       ),
     );
   }
-
-  // ========== PASO 2: FINALIZAR RECORRIDO ==========
 
   void _mostrarFormularioFinalizacion(String recorridoId, Map<String, dynamic> recorridoActual) {
     _kmFinController.clear();
@@ -297,14 +435,27 @@ class _RecorridosPageState extends State<RecorridosPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Vehículo: ${recorridoActual['placa']}'),
-            Text('Km inicial: ${recorridoActual['km_inicio']}'),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                children: [
+                  Text('${recorridoActual['placa']} - ${recorridoActual['vehiculo']}'),
+                  const SizedBox(height: 8),
+                  Text('Conductor: ${recorridoActual['conductor']}'),
+                  Text('Km inicial: ${recorridoActual['km_inicio']} km'),
+                ],
+              ),
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: _kmFinController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Kilometraje final *',
+                labelText: 'Kilometraje final',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -319,46 +470,37 @@ class _RecorridosPageState extends State<RecorridosPage> {
             onPressed: () async {
               final kmFin = int.tryParse(_kmFinController.text);
               if (kmFin == null || kmFin <= (recorridoActual['km_inicio'] as int)) {
-                _mostrarSnackbar('Kilometraje inválido');
+                _mostrarSnackbar('Kilometraje final invalido');
                 return;
               }
 
               await _detenerGPS();
+
               final kmRecorrido = kmFin - (recorridoActual['km_inicio'] as int);
+              final fechaHoraFin = DateTime.now();
 
               await FirebaseFirestore.instance.collection('recorridos').doc(recorridoId).update({
                 'km_fin': kmFin,
                 'km_recorrido': kmRecorrido,
-                'fecha_fin': DateTime.now(),
+                'fecha_fin': fechaHoraFin,
+                'fecha_fin_str': '${fechaHoraFin.day}/${fechaHoraFin.month}/${fechaHoraFin.year} ${fechaHoraFin.hour}:${fechaHoraFin.minute}:${fechaHoraFin.second}',
                 'estado': 'completado',
               });
-
-              if (_puntosGPS.isNotEmpty) {
-                for (var punto in _puntosGPS) {
-                  await FirebaseFirestore.instance
-                      .collection('recorridos')
-                      .doc(recorridoId)
-                      .collection('puntos_gps')
-                      .add(punto);
-                }
-              }
 
               setState(() {
                 _recorridoIdActivo = null;
                 _puntosGPS = [];
               });
 
-              _mostrarSnackbar('Recorrido finalizado');
+              _mostrarSnackbar('Recorrido finalizado. ${kmRecorrido} km recorridos');
               if (context.mounted) Navigator.pop(context);
             },
-            child: const Text('Finalizar'),
+            child: const Text('Finalizar Recorrido'),
           ),
         ],
       ),
     );
   }
-
-  // ========== VER MAPA ==========
 
   void _verMapa(String recorridoId, String placa, String vehiculo) {
     Navigator.push(
@@ -373,11 +515,9 @@ class _RecorridosPageState extends State<RecorridosPage> {
     );
   }
 
-  // ========== UTILIDADES ==========
-
   void _mostrarSnackbar(String mensaje) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(mensaje)),
+      SnackBar(content: Text(mensaje), duration: const Duration(seconds: 2)),
     );
   }
 
@@ -388,20 +528,73 @@ class _RecorridosPageState extends State<RecorridosPage> {
         title: const Text('Recorridos'),
         backgroundColor: const Color(0xFF003580),
         foregroundColor: Colors.white,
+        actions: [
+          if (_recorridoActivo)
+            Container(
+              margin: const EdgeInsets.only(right: 16),
+              child: const Row(
+                children: [
+                  Icon(Icons.circle, color: Colors.green, size: 12),
+                  SizedBox(width: 4),
+                  Text('GRABANDO', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFF003580),
-        onPressed: _recorridoActivo ? null : _mostrarFormularioInicio,
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          if (_recorridoActivo)
+            FloatingActionButton(
+              heroTag: 'btnStop',
+              backgroundColor: Colors.red,
+              onPressed: () async {
+                if (_recorridoIdActivo != null) {
+                  final doc = await FirebaseFirestore.instance
+                      .collection('recorridos')
+                      .doc(_recorridoIdActivo)
+                      .get();
+                  if (doc.exists) {
+                    _mostrarFormularioFinalizacion(_recorridoIdActivo!, doc.data()!);
+                  }
+                }
+              },
+              child: const Icon(Icons.stop),
+            ),
+          const SizedBox(height: 10),
+          FloatingActionButton(
+            heroTag: 'btnAdd',
+            backgroundColor: const Color(0xFF003580),
+            onPressed: _recorridoActivo ? null : _mostrarFormularioInicio,
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('recorridos').orderBy('fecha_inicio', descending: true).snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('recorridos')
+            .orderBy('fecha_inicio', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
           final recorridos = snapshot.data!.docs;
           if (recorridos.isEmpty) {
-            return const Center(child: Text('No hay recorridos'));
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.route, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text('No hay recorridos registrados'),
+                  SizedBox(height: 8),
+                  Text('Presione el boton + para iniciar uno'),
+                ],
+              ),
+            );
           }
 
           return ListView.builder(
@@ -413,18 +606,42 @@ class _RecorridosPageState extends State<RecorridosPage> {
               final estaActivo = estado == 'en_curso';
               
               return Card(
-                color: estaActivo ? Colors.yellow[50] : null,
+                elevation: estaActivo ? 4 : 1,
+                color: estaActivo ? Colors.yellow[50] : Colors.white,
                 child: ListTile(
-                  title: Text('${r['placa']} - ${r['conductor']}'),
-                  subtitle: Text('Km: ${r['km_inicio']} → ${r['km_fin'] ?? "..."}'),
+                  leading: CircleAvatar(
+                    backgroundColor: estaActivo ? Colors.green : Colors.blue,
+                    child: Icon(
+                      estaActivo ? Icons.play_arrow : Icons.check_circle,
+                      color: Colors.white,
+                    ),
+                  ),
+                  title: Text(
+                    '${r['placa']} - ${r['conductor']}',
+                    style: TextStyle(
+                      fontWeight: estaActivo ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Inicio: ${r['fecha_inicio_str'] ?? ''}'),
+                      Text('Km: ${r['km_inicio']} -> ${r['km_fin'] ?? '...'} (${r['km_recorrido'] ?? 'En curso'} km)'),
+                      if (estaActivo)
+                        const Text('EN CURSO', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
                   trailing: estaActivo
-                      ? ElevatedButton(
+                      ? ElevatedButton.icon(
                           onPressed: () => _mostrarFormularioFinalizacion(recorridos[i].id, r),
-                          child: const Text('Finalizar'),
+                          icon: const Icon(Icons.stop, size: 18),
+                          label: const Text('Finalizar'),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                         )
                       : IconButton(
                           icon: const Icon(Icons.map),
                           onPressed: () => _verMapa(recorridos[i].id, r['placa'] ?? '', r['vehiculo'] ?? ''),
+                          tooltip: 'Ver recorrido en mapa',
                         ),
                 ),
               );
@@ -439,17 +656,13 @@ class _RecorridosPageState extends State<RecorridosPage> {
   void dispose() {
     _kmInicioController.dispose();
     _kmFinController.dispose();
-    _fiscaliaController.dispose();
-    _diligenciaController.dispose();
     _conductorController.dispose();
-    _carpetaController.dispose();
     _posicionStream?.cancel();
     super.dispose();
   }
 }
 
-// ========== PÁGINA DEL MAPA CORREGIDA ==========
-
+// Mapa Recorrido Page
 class MapaRecorridoPage extends StatefulWidget {
   final String recorridoId;
   final String placa;
@@ -468,32 +681,102 @@ class MapaRecorridoPage extends StatefulWidget {
 
 class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
   List<LatLng> _puntos = [];
+  List<Map<String, dynamic>> _paradas = [];
   bool _cargando = true;
-  final MapController _mapController = MapController();
+  late MapController _mapController;
 
   @override
   void initState() {
     super.initState();
+    _mapController = MapController();
     _cargarDatos();
   }
 
   Future<void> _cargarDatos() async {
-    final puntosSnapshot = await FirebaseFirestore.instance
-        .collection('recorridos')
-        .doc(widget.recorridoId)
-        .collection('puntos_gps')
-        .orderBy('hora')
-        .get();
+    try {
+      final puntosSnapshot = await FirebaseFirestore.instance
+          .collection('recorridos')
+          .doc(widget.recorridoId)
+          .collection('puntos_gps')
+          .orderBy('hora')
+          .get();
 
-    final puntosTemp = <LatLng>[];
-    for (var doc in puntosSnapshot.docs) {
-      puntosTemp.add(LatLng(doc['lat'], doc['lng']));
+      final puntosTemp = <LatLng>[];
+      for (var doc in puntosSnapshot.docs) {
+        puntosTemp.add(LatLng(doc['lat'], doc['lng']));
+      }
+
+      final paradasSnapshot = await FirebaseFirestore.instance
+          .collection('recorridos')
+          .doc(widget.recorridoId)
+          .collection('paradas')
+          .get();
+
+      setState(() {
+        _puntos = puntosTemp;
+        _paradas = paradasSnapshot.docs.map((d) => d.data()).toList();
+        _cargando = false;
+      });
+    } catch (e) {
+      print('Error cargando datos: $e');
+      setState(() => _cargando = false);
     }
+  }
 
-    setState(() {
-      _puntos = puntosTemp;
-      _cargando = false;
-    });
+  String _formatearFecha(DateTime fecha) {
+    return '${fecha.day}/${fecha.month}/${fecha.year} ${fecha.hour}:${fecha.minute}';
+  }
+
+  void _mostrarDetalleParada(Map<String, dynamic> parada) {
+    final inicio = (parada['inicio'] as Timestamp?)?.toDate();
+    final fin = (parada['fin'] as Timestamp?)?.toDate();
+    final ubicacion = parada['ubicacion'] as GeoPoint?;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.pause_circle, color: Colors.orange, size: 28),
+                SizedBox(width: 10),
+                Text('Detalle de Parada', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (inicio != null) _buildInfoRow('Inicio:', _formatearFecha(inicio)),
+            if (fin != null) _buildInfoRow('Fin:', _formatearFecha(fin)),
+            _buildInfoRow('Duracion:', '${parada['duracion_minutos'] ?? 0} minutos'),
+            const SizedBox(height: 12),
+            if (ubicacion != null) ...[
+              const Divider(),
+              _buildInfoRow('Latitud:', ubicacion.latitude.toStringAsFixed(6)),
+              _buildInfoRow('Longitud:', ubicacion.longitude.toStringAsFixed(6)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 70, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500))),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -509,41 +792,133 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
         title: Text('${widget.placa} - ${widget.vehiculo}'),
         backgroundColor: const Color(0xFF003580),
         foregroundColor: Colors.white,
-      ),
-      body: FlutterMap(
-        mapController: _mapController,
-        options: MapOptions(initialCenter: centro, initialZoom: 14),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.ministerio.publico.cbt',
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong),
+            onPressed: () => _mapController.move(centro, 14),
           ),
-          if (_puntos.isNotEmpty)
-            PolylineLayer(
-              polylines: [
-                Polyline(points: _puntos, strokeWidth: 4, color: Colors.blue),
-              ],
-            ),
-          if (_puntos.isNotEmpty)
-            MarkerLayer(
-              markers: [
-                Marker(
-                  point: _puntos.first,
-                  width: 40,
-                  height: 40,
-                  child: const Icon(Icons.location_on, color: Colors.green, size: 40),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: Colors.blue[50],
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  children: [
+                    const Icon(Icons.play_circle, color: Colors.green),
+                    const Text('Inicio'),
+                    Text(_puntos.isNotEmpty ? '${_puntos.first.latitude.toStringAsFixed(4)}' : '-'),
+                  ],
                 ),
-                if (_puntos.length > 1)
-                  Marker(
-                    point: _puntos.last,
-                    width: 40,
-                    height: 40,
-                    child: const Icon(Icons.location_on, color: Colors.red, size: 40),
-                  ),
+                Column(
+                  children: [
+                    const Icon(Icons.pause_circle, color: Colors.orange),
+                    const Text('Paradas'),
+                    Text('${_paradas.length}'),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const Icon(Icons.flag, color: Colors.red),
+                    const Text('Distancia'),
+                    Text('${(_calcularDistanciaTotal() / 1000).toStringAsFixed(2)} km'),
+                  ],
+                ),
               ],
             ),
+          ),
+          Expanded(
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(initialCenter: centro, initialZoom: 14),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+                  subdomains: ['a', 'b', 'c'],
+                  userAgentPackageName: 'com.ministerio.publico.cbt',
+                ),
+                if (_puntos.isNotEmpty)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: _puntos,
+                        strokeWidth: 4,
+                        color: Colors.blue,
+                        borderStrokeWidth: 1,
+                        borderColor: Colors.white,
+                      ),
+                    ],
+                  ),
+                MarkerLayer(
+                  markers: [
+                    if (_puntos.isNotEmpty)
+                      Marker(
+                        point: _puntos.first,
+                        width: 50,
+                        height: 50,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: Colors.green,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.play_arrow, color: Colors.white, size: 30),
+                        ),
+                      ),
+                    if (_puntos.length > 1)
+                      Marker(
+                        point: _puntos.last,
+                        width: 50,
+                        height: 50,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.stop, color: Colors.white, size: 30),
+                        ),
+                      ),
+                    for (var parada in _paradas)
+                      if (parada['ubicacion'] != null)
+                        Marker(
+                          point: LatLng(
+                            (parada['ubicacion'] as GeoPoint).latitude,
+                            (parada['ubicacion'] as GeoPoint).longitude,
+                          ),
+                          width: 45,
+                          height: 45,
+                          child: GestureDetector(
+                            onTap: () => _mostrarDetalleParada(parada),
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.orange,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.pause, color: Colors.white, size: 25),
+                            ),
+                          ),
+                        ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  double _calcularDistanciaTotal() {
+    double distancia = 0;
+    for (int i = 0; i < _puntos.length - 1; i++) {
+      distancia += Geolocator.distanceBetween(
+        _puntos[i].latitude, _puntos[i].longitude,
+        _puntos[i + 1].latitude, _puntos[i + 1].longitude,
+      );
+    }
+    return distancia;
   }
 }
