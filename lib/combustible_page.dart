@@ -16,6 +16,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
   String? _vehiculoSeleccionado;
   String? _placaSeleccionada;
   Uint8List? _imagenBytes;
+  String? _errorMensaje; // Para mostrar errores al usuario
 
   Future<String?> _subirBaucher(String placa) async {
     if (_imagenBytes == null) return null;
@@ -27,6 +28,10 @@ class _CombustiblePageState extends State<CombustiblePage> {
   }
 
   void _mostrarFormulario() {
+    // Limpiar error al abrir
+    _errorMensaje = null;
+    _litrosController.clear();
+    
     showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
@@ -69,6 +74,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
                         setStateDialog(() {
                           _vehiculoSeleccionado = val;
                           _placaSeleccionada = data['placa'];
+                          _errorMensaje = null;
                         });
                       },
                     );
@@ -77,11 +83,13 @@ class _CombustiblePageState extends State<CombustiblePage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _litrosController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Litros cargados',
                     suffixText: 'L',
+                    errorText: _errorMensaje,
+                    hintText: 'Ejemplo: 60.427',
                   ),
-                  keyboardType: TextInputType.number,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 ),
                 const SizedBox(height: 12),
                 const Text(
@@ -111,6 +119,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
                       final bytes = await imagen.readAsBytes();
                       setStateDialog(() {
                         _imagenBytes = bytes;
+                        _errorMensaje = null;
                       });
                     }
                   },
@@ -127,6 +136,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
                 _vehiculoSeleccionado = null;
                 _placaSeleccionada = null;
                 _litrosController.clear();
+                _errorMensaje = null;
                 Navigator.pop(context);
               },
               child: const Text('Cancelar'),
@@ -137,31 +147,88 @@ class _CombustiblePageState extends State<CombustiblePage> {
                 foregroundColor: Colors.white,
               ),
               onPressed: () async {
-                if (_vehiculoSeleccionado == null) return;
-                final litros = int.tryParse(_litrosController.text) ?? 0;
+                // VALIDACIÓN: Vehículo seleccionado
+                if (_vehiculoSeleccionado == null) {
+                  setStateDialog(() {
+                    _errorMensaje = 'Seleccione un vehículo';
+                  });
+                  return;
+                }
+                
+                // 🔧 CORRECCIÓN PRINCIPAL: Leer números reales (con decimales)
+                final litrosTexto = _litrosController.text.trim();
+                if (litrosTexto.isEmpty) {
+                  setStateDialog(() {
+                    _errorMensaje = 'Ingrese la cantidad de litros';
+                  });
+                  return;
+                }
+                
+                // Reemplazar coma por punto (por si usan 60,427 en lugar de 60.427)
+                final litrosTextoNormalizado = litrosTexto.replaceAll(',', '.');
+                final litros = double.tryParse(litrosTextoNormalizado);
+                
+                if (litros == null) {
+                  setStateDialog(() {
+                    _errorMensaje = 'Ingrese un número válido (ejemplo: 60.427)';
+                  });
+                  return;
+                }
+                
+                if (litros <= 0) {
+                  setStateDialog(() {
+                    _errorMensaje = 'Los litros deben ser mayores a 0';
+                  });
+                  return;
+                }
+                
+                // Validación de foto (opcional, pero recomendado)
+                if (_imagenBytes == null) {
+                  setStateDialog(() {
+                    _errorMensaje = 'Seleccione la foto del baucher';
+                  });
+                  return;
+                }
+                
+                // Cerrar el diálogo antes de procesar
+                Navigator.pop(context);
+                
+                // Procesar el registro
                 final baucherUrl = await _subirBaucher(_placaSeleccionada ?? '');
                 await FirebaseFirestore.instance
                     .collection('combustible')
                     .add({
                   'vehiculo_id': _vehiculoSeleccionado,
                   'placa': _placaSeleccionada,
-                  'litros': litros,
+                  'litros': litros, // 🔧 Ahora es double, no int
                   'baucher_url': baucherUrl ?? '',
                   'fecha': DateTime.now(),
                   'mes': DateTime.now().month,
                   'anio': DateTime.now().year,
                 });
+                
                 await FirebaseFirestore.instance
                     .collection('vehiculos')
                     .doc(_vehiculoSeleccionado)
                     .update({
-                  'litros_usados': FieldValue.increment(litros),
+                  'litros_usados': FieldValue.increment(litros), // 🔧 Incrementa double
                 });
+                
+                // Limpiar campos
                 _litrosController.clear();
                 _imagenBytes = null;
                 _vehiculoSeleccionado = null;
                 _placaSeleccionada = null;
-                if (context.mounted) Navigator.pop(context);
+                _errorMensaje = null;
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Registrado: ${litros.toStringAsFixed(3)} litros'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
               },
               child: const Text('Guardar'),
             ),
@@ -204,10 +271,12 @@ class _CombustiblePageState extends State<CombustiblePage> {
             itemCount: vehiculos.length,
             itemBuilder: (context, index) {
               final v = vehiculos[index].data() as Map<String, dynamic>;
-              final litrosUsados = (v['litros_usados'] ?? 0).toDouble();
-              final limiteMensual = (v['limite_litros'] ?? 300).toDouble();
+              // 🔧 Asegurar que litros_usados sea double
+              final litrosUsados = (v['litros_usados'] ?? 0.0).toDouble();
+              final limiteMensual = (v['limite_litros'] ?? 300.0).toDouble();
               final litrosRestantes = limiteMensual - litrosUsados;
               final porcentaje = (litrosUsados / limiteMensual).clamp(0.0, 1.0);
+              
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: Padding(
@@ -233,9 +302,9 @@ class _CombustiblePageState extends State<CombustiblePage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Usados: ${litrosUsados.toStringAsFixed(0)} L'),
+                          Text('Usados: ${litrosUsados.toStringAsFixed(3)} L'),
                           Text(
-                            'Restantes: ${litrosRestantes.toStringAsFixed(0)} L',
+                            'Restantes: ${litrosRestantes.toStringAsFixed(3)} L',
                             style: TextStyle(
                               color: litrosRestantes < 50
                                   ? Colors.red
@@ -256,7 +325,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${(porcentaje * 100).toStringAsFixed(0)}% del límite mensual (${limiteMensual.toStringAsFixed(0)} L)',
+                        '${(porcentaje * 100).toStringAsFixed(1)}% del límite mensual (${limiteMensual.toStringAsFixed(0)} L)',
                         style: const TextStyle(
                           fontSize: 12,
                           color: Colors.grey,
