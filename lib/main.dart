@@ -9,6 +9,7 @@ import 'vehiculos_page.dart';
 import 'combustible_page.dart';
 import 'recorridos_page.dart';
 import 'mantenimiento_page.dart';
+import 'estadisticas_page.dart';
 import 'usuario_provider.dart';
 
 void main() async {
@@ -23,11 +24,11 @@ void main() async {
 }
 
 // ─── PALETA INSTITUCIONAL ─────────────────────────────────────────────────────
-const kNavy = Color(0xFF002B6E); // azul oscuro principal
-const kNavyLight = Color(0xFF003D99); // azul medio
-const kGold = Color(0xFFE5A800); // dorado del escudo
-const kGoldLight = Color(0xFFFFC825); // dorado claro
-const kSurface = Color(0xFFF4F6FB); // fondo claro
+const kNavy = Color(0xFF002B6E);
+const kNavyLight = Color(0xFF003D99);
+const kGold = Color(0xFFE5A800);
+const kGoldLight = Color(0xFFFFC825);
+const kSurface = Color(0xFFF4F6FB);
 const kCardBg = Colors.white;
 const kTextDark = Color(0xFF0D1B3E);
 const kTextMuted = Color(0xFF6B7A99);
@@ -78,7 +79,6 @@ class _LoginPageState extends State<LoginPage> {
           );
       if (!mounted) return;
 
-      // 2. Obtener rol desde Firestore
       final doc = await FirebaseFirestore.instance
           .collection('admins')
           .doc(userCredential.user?.uid)
@@ -117,7 +117,6 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: Stack(
         children: [
-          // ── Fondo degradado institucional ──────────────────────────────────
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -127,8 +126,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ),
-
-          // ── Patrón de puntos sutil ─────────────────────────────────────────
           Opacity(
             opacity: 0.06,
             child: CustomPaint(
@@ -136,16 +133,12 @@ class _LoginPageState extends State<LoginPage> {
               size: Size.infinite,
             ),
           ),
-
-          // ── Franja dorada superior ─────────────────────────────────────────
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             child: Container(height: 4, color: kGold),
           ),
-
-          // ── Contenido central ──────────────────────────────────────────────
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -155,7 +148,6 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 child: Column(
                   children: [
-                    // Logo + sello
                     Container(
                       width: 108,
                       height: 108,
@@ -177,10 +169,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 20),
-
-                    // Títulos
                     const Text(
                       'MINISTERIO PÚBLICO',
                       style: TextStyle(
@@ -209,10 +198,7 @@ class _LoginPageState extends State<LoginPage> {
                         Container(width: 30, height: 1.5, color: kGold),
                       ],
                     ),
-
                     const SizedBox(height: 38),
-
-                    // Tarjeta del formulario
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.07),
@@ -232,7 +218,6 @@ class _LoginPageState extends State<LoginPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Etiqueta superior
                           Row(
                             children: [
                               Container(
@@ -255,20 +240,14 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ],
                           ),
-
                           const SizedBox(height: 20),
-
-                          // Campo correo
                           _CampoTexto(
                             controller: _emailController,
                             label: 'Correo institucional',
                             icono: Icons.alternate_email_rounded,
                             teclado: TextInputType.emailAddress,
                           ),
-
                           const SizedBox(height: 14),
-
-                          // Campo contraseña
                           _CampoTexto(
                             controller: _passwordController,
                             label: 'Contraseña',
@@ -286,8 +265,6 @@ class _LoginPageState extends State<LoginPage> {
                                   setState(() => _verClave = !_verClave),
                             ),
                           ),
-
-                          // Error
                           if (_error.isNotEmpty) ...[
                             const SizedBox(height: 12),
                             Container(
@@ -321,10 +298,7 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                           ],
-
                           const SizedBox(height: 22),
-
-                          // Botón ingresar
                           SizedBox(
                             width: double.infinity,
                             height: 50,
@@ -368,10 +342,7 @@ class _LoginPageState extends State<LoginPage> {
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 32),
-
-                    // Pie de página institucional
                     const Text(
                       'Procuraduría General de la Nación',
                       style: TextStyle(color: Colors.white38, fontSize: 11),
@@ -386,8 +357,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ),
-
-          // ── Franja dorada inferior ─────────────────────────────────────────
           Positioned(
             bottom: 0,
             left: 0,
@@ -489,8 +458,6 @@ class PantallaPrincipal extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: kSurface,
-
-      // ── AppBar ─────────────────────────────────────────────────────────────
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(64),
         child: Container(
@@ -559,10 +526,8 @@ class PantallaPrincipal extends StatelessWidget {
           ),
         ),
       ),
-
       body: Column(
         children: [
-          // ── Banner de saludo ──────────────────────────────────────────────
           Container(
             width: double.infinity,
             decoration: const BoxDecoration(
@@ -576,7 +541,6 @@ class PantallaPrincipal extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Franja dorada
                 Container(
                   width: 36,
                   height: 3,
@@ -611,11 +575,7 @@ class PantallaPrincipal extends StatelessWidget {
               ],
             ),
           ),
-
-          // ── Separador dorado ──────────────────────────────────────────────
           Container(height: 3, color: kGold),
-
-          // ── Grid de módulos ───────────────────────────────────────────────
           Expanded(
             child: GridView(
               padding: const EdgeInsets.all(16),
@@ -655,23 +615,22 @@ class PantallaPrincipal extends StatelessWidget {
                   color: const Color(0xFF6A1B9A),
                   pagina: MantenimientoPage(),
                 ),
+                _ModuloCard(
+                  icono: Icons.bar_chart_rounded,
+                  titulo: 'Estadísticas',
+                  descripcion: 'Dashboard y reportes',
+                  color: const Color(0xFFE5A800),
+                  pagina: EstadisticasPage(),   // ✅ CORREGIDO: sin "const"
+                ),
                 const _ModuloCard(
                   icono: Icons.car_crash_rounded,
                   titulo: 'Daños',
                   descripcion: 'Incidentes y daños',
                   color: Color(0xFFC62828),
                 ),
-                // const _ModuloCard(
-                //   icono: Icons.manage_accounts_rounded,
-                //   titulo: 'Usuarios',
-                //   descripcion: 'Acceso y permisos',
-                //   color: Color(0xFF00695C),
-                // ),
               ],
             ),
           ),
-
-          // ── Pie institucional ─────────────────────────────────────────────
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 10),
@@ -684,7 +643,7 @@ class PantallaPrincipal extends StatelessWidget {
                   style: TextStyle(color: Colors.white38, fontSize: 10),
                 ),
                 Text(
-                  'Sistema Interno v1.0 · Uso oficial',
+                  'Sistema Interno v2.0 · Uso oficial',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white24, fontSize: 9),
                 ),
@@ -740,7 +699,6 @@ class _ModuloCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Ícono
               Container(
                 width: 48,
                 height: 48,
@@ -750,10 +708,7 @@ class _ModuloCard extends StatelessWidget {
                 ),
                 child: Icon(icono, color: color, size: 26),
               ),
-
               const Spacer(),
-
-              // Texto
               Text(
                 titulo,
                 style: TextStyle(
@@ -767,10 +722,7 @@ class _ModuloCard extends StatelessWidget {
                 descripcion,
                 style: const TextStyle(color: kTextMuted, fontSize: 11),
               ),
-
               const SizedBox(height: 8),
-
-              // Indicador de disponibilidad
               Row(
                 children: [
                   Container(
