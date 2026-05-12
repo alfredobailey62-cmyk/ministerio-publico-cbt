@@ -623,7 +623,7 @@ class PantallaPrincipal extends StatelessWidget {
                   color: const Color(0xFFE5A800),
                   pagina: EstadisticasPage(), // ✅ CORREGIDO: sin "const"
                 ),
-                const _ModuloCard(
+                _ModuloCard(
                   icono: Icons.car_crash_rounded,
                   titulo: 'Daños',
                   descripcion: 'Incidentes y daños',

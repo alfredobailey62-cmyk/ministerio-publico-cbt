@@ -252,14 +252,34 @@ class _DanosPageState extends State<DanosPage> {
                         fotoUrl = await _subirFoto(_placaSeleccionada ?? '');
                       }
 
-                      await FirebaseFirestore.instance.collection('danos').add({
-                        'vehiculo_id': _vehiculoSeleccionado,
-                        'placa': _placaSeleccionada ?? '',
-                        'descripcion': _descripcionController.text.trim(),
-                        'gravedad': _gravedad,
-                        'foto_url': fotoUrl ?? '',
-                        'fecha': Timestamp.now(),
-                      });
+                      // 🔥 GUARDAR DAÑO
+                      final danoRef = await FirebaseFirestore.instance
+                          .collection('danos')
+                          .add({
+                            'vehiculo_id': _vehiculoSeleccionado,
+                            'placa': _placaSeleccionada ?? '',
+                            'descripcion': _descripcionController.text.trim(),
+                            'gravedad': _gravedad,
+                            'foto_url': fotoUrl ?? '',
+                            'fecha': Timestamp.now(),
+                          });
+
+                      // 🔥 CREAR NOTIFICACIÓN PARA EL ADMIN
+                      await FirebaseFirestore.instance
+                          .collection('notificaciones')
+                          .add({
+                            'titulo': 'Nuevo daño reportado',
+                            'mensaje':
+                                'Vehículo ${_placaSeleccionada ?? ''} reportó un daño $_gravedad',
+                            'descripcion': _descripcionController.text.trim(),
+                            'placa': _placaSeleccionada ?? '',
+                            'gravedad': _gravedad,
+                            'foto_url': fotoUrl ?? '',
+                            'dano_id': danoRef.id,
+                            'leida': false,
+                            'fecha': Timestamp.now(),
+                            'tipo': 'dano',
+                          });
 
                       debugPrint("✅ Guardado exitoso");
 
