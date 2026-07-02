@@ -11,6 +11,7 @@ import 'recorridos_page.dart';
 import 'mantenimiento_page.dart';
 import 'estadisticas_page.dart';
 import 'usuario_provider.dart';
+import 'danos_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -620,13 +621,14 @@ class PantallaPrincipal extends StatelessWidget {
                   titulo: 'Estadísticas',
                   descripcion: 'Dashboard y reportes',
                   color: const Color(0xFFE5A800),
-                  pagina: EstadisticasPage(),   // ✅ CORREGIDO: sin "const"
+                  pagina: EstadisticasPage(), // ✅ CORREGIDO: sin "const"
                 ),
-                const _ModuloCard(
+                _ModuloCard(
                   icono: Icons.car_crash_rounded,
                   titulo: 'Daños',
                   descripcion: 'Incidentes y daños',
-                  color: Color(0xFFC62828),
+                  color: const Color(0xFFC62828),
+                  pagina: DanosPage(),
                 ),
               ],
             ),
