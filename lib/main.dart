@@ -11,6 +11,7 @@ import 'recorridos_page.dart';
 import 'mantenimiento_page.dart';
 import 'estadisticas_page.dart';
 import 'usuario_provider.dart';
+
 import 'danos_page.dart';
 
 void main() async {
@@ -33,7 +34,6 @@ const kSurface = Color(0xFFF4F6FB);
 const kCardBg = Colors.white;
 const kTextDark = Color(0xFF0D1B3E);
 const kTextMuted = Color(0xFF6B7A99);
-
 // ─── APP ──────────────────────────────────────────────────────────────────────
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
