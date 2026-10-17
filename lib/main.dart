@@ -1,4 +1,4 @@
-﻿
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -104,8 +104,10 @@ class _LoginPageState extends State<LoginPage> {
   String _error = '';
 
   Future<void> _ingresar() async {
-    if (_emailController.text.trim().isEmpty ||
-        _passwordController.text.isEmpty) {
+    final usuarioInput = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (usuarioInput.isEmpty || password.isEmpty) {
       setState(() => _error = 'Introduzca su usuario y contraseña.');
       return;
     }
@@ -116,10 +118,16 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
+      // Si escribió un correo, usarlo directo. Si escribió un nombre
+      // de usuario, convertirlo al correo interno del sistema.
+      final email = usuarioInput.contains('@')
+          ? usuarioInput
+          : '${usuarioInput.toLowerCase()}@controlflota.local';
+
       final credencial = await FirebaseAuth.instance
           .signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
+        email: email,
+        password: password,
       );
 
       final uid = credencial.user?.uid;
@@ -128,20 +136,49 @@ class _LoginPageState extends State<LoginPage> {
         throw Exception('No se pudo identificar al usuario.');
       }
 
-      final adminDoc = await FirebaseFirestore.instance
-          .collection('admins')
+      // Buscar el documento del usuario por su UID de Firebase Auth
+      final doc = await FirebaseFirestore.instance
+          .collection('usuarios')
           .doc(uid)
           .get();
 
-      if (!mounted) return;
+      if (!doc.exists) {
+        await FirebaseAuth.instance.signOut();
+        if (mounted) {
+          setState(() {
+            _error = 'Usuario no registrado en el sistema.';
+            _cargando = false;
+          });
+        }
+        return;
+      }
+
+      final datos = doc.data()!;
+      final activo = datos['activo'] == true;
+      final esAdmin =
+          datos['admin'] == true || datos['rol'] == 'admin';
+
+      if (!activo) {
+        await FirebaseAuth.instance.signOut();
+        if (mounted) {
+          setState(() {
+            _error =
+                'Usuario desactivado. Contacte al administrador.';
+            _cargando = false;
+          });
+        }
+        return;
+      }
+
+      final nombre =
+          (datos['nombre'] ?? usuarioInput).toString();
 
       Provider.of<UsuarioProvider>(
         context,
         listen: false,
-      ).setUsuario(
-        _emailController.text.trim(),
-        adminDoc.exists,
-      );
+      ).setUsuario(nombre, esAdmin);
+
+      if (!mounted) return;
 
       Navigator.pushReplacement(
         context,
@@ -151,19 +188,26 @@ class _LoginPageState extends State<LoginPage> {
       );
     } on FirebaseAuthException catch (e) {
       if (e.code == 'network-request-failed') {
-        setState(() => _error = 'Compruebe su conexión a internet.');
+        setState(() =>
+            _error = 'Compruebe su conexión a internet.');
+      } else if (e.code == 'user-not-found' ||
+          e.code == 'wrong-password' ||
+          e.code == 'invalid-credential') {
+        setState(() =>
+            _error = 'Usuario o contraseña incorrectos.');
       } else {
-        setState(() => _error = 'Correo o contraseña incorrectos.');
+        setState(() => _error = 'Error: ${e.message ?? e.code}');
       }
     } catch (_) {
-      setState(() => _error = 'No se pudo iniciar sesión.');
+      if (mounted) {
+        setState(() => _error = 'No se pudo iniciar sesión.');
+      }
     } finally {
       if (mounted) {
         setState(() => _cargando = false);
       }
     }
   }
-
   @override
   void dispose() {
     _emailController.dispose();
@@ -538,13 +582,6 @@ class PantallaPrincipal extends StatelessWidget {
     return 'Buenas noches';
   }
 
-  String get _usuarioNombre {
-    final user = FirebaseAuth.instance.currentUser;
-    return user?.displayName ??
-        user?.email?.split('@').first ??
-        'Usuario';
-  }
-
   Future<void> _cerrarSesion(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
 
@@ -561,6 +598,7 @@ class PantallaPrincipal extends StatelessWidget {
   Widget build(BuildContext context) {
     final usuario = context.watch<UsuarioProvider>();
     final esAdmin = usuario.isAdmin;
+    final username = usuario.email;
 
     final modulos = <_ModuloInfo>[
       if (esAdmin)
@@ -726,7 +764,7 @@ class PantallaPrincipal extends StatelessWidget {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            _usuarioNombre,
+                            username,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(

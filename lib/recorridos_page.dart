@@ -1638,10 +1638,7 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
               options: MapOptions(initialCenter: centro, initialZoom: 14, initialCameraFit: _puntos.length > 1 ? CameraFit.bounds(bounds: LatLngBounds.fromPoints(_puntos), padding: const EdgeInsets.all(40)) : null),
               children: [
                 TileLayer(
-                  urlTemplate:
-                      'https://{s}.basemaps.cartocdn.com/light_all/'
-                      '{z}/{x}/{y}.png',
-                  subdomains: const ['a', 'b', 'c'],
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName:
                       'com.ministerio.publico.cbt',
                 ),
@@ -1703,3 +1700,4 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
     );
   }
 }
+
