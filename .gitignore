@@ -48,3 +48,8 @@ app.*.map.json
 *.bak
 *_viejo_*
 recorridos_con_numeros.txt
+
+# Backups adicionales
+*.bak2
+*.bak3
+usuarios_backup.json

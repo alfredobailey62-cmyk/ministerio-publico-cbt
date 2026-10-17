@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 class MantenimientoPage extends StatefulWidget {
   const MantenimientoPage({super.key});
@@ -12,345 +12,1018 @@ class MantenimientoPage extends StatefulWidget {
 }
 
 class _MantenimientoPageState extends State<MantenimientoPage> {
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  final _descripcionController = TextEditingController();
-  final _costoController = TextEditingController();
-  final _kmController = TextEditingController();
-  final _responsableController = TextEditingController();
+  static const int intervaloMantenimiento = 5000;
+  static const Color azul = Color(0xFF003580);
+  static const Color dorado = Color(0xFFD4AF37);
 
-  String? _vehiculoSeleccionado;
-  String? _placaSeleccionada;
-  String? _marcaModelo;
-
-  String _tipoTrabajo = 'Cambio de aceite';
-  String _tipoEjecucion = 'Taller externo';
-
-  final picker = ImagePicker();
-
-  XFile? _fotoKm;
-  List<XFile> _fotosTrabajo = [];
-  List<XFile> _fotosPiezas = [];
-
-  final List<String> tiposTrabajo = [
-    'Cambio de aceite',
-    'Revisión general',
-    'Otro'
-  ];
-
-  final List<String> tipoEjecucion = [
-    'Taller externo',
-    'Mecánicos institucionales'
-  ];
-
-  // ================== IMÁGENES ==================
-
-  Future<XFile?> _seleccionarImagen() async {
-    return await picker.pickImage(source: ImageSource.camera);
+  int? _numero(dynamic valor) {
+    if (valor is num) return valor.toInt();
+    return int.tryParse(valor?.toString() ?? '');
   }
 
-  Future<List<String>> _subirImagenes(List<XFile> imagenes) async {
-    List<String> urls = [];
-
-    for (var img in imagenes) {
-      final bytes = await img.readAsBytes();
-
-      final ref = FirebaseStorage.instance
-          .ref('mantenimientos/${DateTime.now().millisecondsSinceEpoch}.jpg');
-
-      await ref.putData(bytes);
-      final url = await ref.getDownloadURL();
-      urls.add(url);
-    }
-
-    return urls;
+  double _dinero(dynamic valor) {
+    if (valor is num) return valor.toDouble();
+    return double.tryParse(valor?.toString() ?? '') ?? 0;
   }
 
-  // ================== FORMULARIO ==================
+  String _fecha(dynamic valor) {
+    DateTime? fecha;
 
-  void _mostrarFormulario() {
-    showDialog(
+    if (valor is Timestamp) fecha = valor.toDate();
+    if (valor is DateTime) fecha = valor;
+
+    if (fecha == null) return 'Fecha no disponible';
+
+    final d = fecha.day.toString().padLeft(2, '0');
+    final m = fecha.month.toString().padLeft(2, '0');
+
+    return '$d/$m/${fecha.year} '
+        '${fecha.hour.toString().padLeft(2, '0')}:'
+        '${fecha.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _usuario() {
+    return FirebaseAuth.instance.currentUser?.email ?? 'Usuario del sistema';
+  }
+
+  int? _kmActual(Map<String, dynamic> vehiculo) {
+    return _numero(
+      vehiculo['kilometraje'] ??
+      vehiculo['km_actual'] ??
+      vehiculo['km'],
+    );
+  }
+
+  void _mensaje(String texto, {bool error = false}) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(texto),
+        backgroundColor: error ? Colors.red.shade800 : azul,
+      ),
+    );
+  }
+
+  Future<void> _registrarMantenimiento() async {
+    final responsable = TextEditingController();
+    final kmController = TextEditingController();
+    final costoController = TextEditingController();
+    final detalleController = TextEditingController();
+
+    String? vehiculoId;
+    String tipo = 'Cambio de aceite';
+    String ejecucion = 'Taller externo';
+
+    final tipos = [
+      'Cambio de aceite',
+      'Revisión general',
+      'Frenos',
+      'Llantas',
+      'Motor',
+      'Sistema eléctrico',
+      'Otro',
+    ];
+
+    final formas = [
+      'Taller externo',
+      'Mecánicos institucionales',
+    ];
+
+    final resultado = await showDialog<bool>(
       context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setStateDialog) => AlertDialog(
-          title: const Text('Registrar Mantenimiento'),
-          content: SingleChildScrollView(
-            child: Column(
-              children: [
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Registrar mantenimiento'),
+              content: SizedBox(
+                width: 450,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: _db.collection('vehiculos').snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const LinearProgressIndicator();
+                          }
 
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('vehiculos').snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const CircularProgressIndicator();
-                    }
+                          final vehiculos = snapshot.data!.docs;
 
-                    final vehiculos = snapshot.data!.docs;
+                          return DropdownButtonFormField<String>(
+                            value: vehiculoId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Vehículo',
+                              prefixIcon: Icon(Icons.directions_car),
+                            ),
+                            items: vehiculos.map((doc) {
+                              final v = doc.data();
+                              final placa = v['placa'] ?? 'Sin placa';
+                              final marca = v['marca'] ?? '';
+                              final modelo = v['modelo'] ?? '';
 
-                    return DropdownButton<String>(
-                      isExpanded: true,
-                      hint: const Text('Seleccione vehículo'),
-                      value: _vehiculoSeleccionado,
-                      items: vehiculos.map((v) {
-                        final data = v.data() as Map<String, dynamic>;
-                        return DropdownMenuItem(
-                          value: v.id,
-                          child: Text('${data['placa']} - ${data['marca']} ${data['modelo']}'),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        final v = vehiculos.firstWhere((e) => e.id == val);
-                        final data = v.data() as Map<String, dynamic>;
-
-                        setStateDialog(() {
-                          _vehiculoSeleccionado = val;
-                          _placaSeleccionada = data['placa'];
-                          _marcaModelo = '${data['marca']} ${data['modelo']}';
-                        });
-                      },
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 10),
-
-                DropdownButton<String>(
-                  value: _tipoTrabajo,
-                  isExpanded: true,
-                  items: tiposTrabajo.map((t) =>
-                      DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (val) =>
-                      setStateDialog(() => _tipoTrabajo = val!),
-                ),
-
-                if (_tipoTrabajo == 'Otro')
-                  TextField(
-                    controller: _descripcionController,
-                    decoration: const InputDecoration(labelText: 'Detalle del trabajo'),
+                              return DropdownMenuItem(
+                                value: doc.id,
+                                child: Text('$placa - $marca $modelo'),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setDialogState(() => vehiculoId = value);
+                            },
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: tipo,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Trabajo realizado',
+                        ),
+                        items: tipos.map((item) {
+                          return DropdownMenuItem(
+                            value: item,
+                            child: Text(item),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setDialogState(() => tipo = value);
+                          }
+                        },
+                      ),
+                      if (tipo == 'Otro')
+                        TextField(
+                          controller: detalleController,
+                          decoration: const InputDecoration(
+                            labelText: 'Descripción del trabajo',
+                          ),
+                        ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: ejecucion,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Tipo de ejecución',
+                        ),
+                        items: formas.map((item) {
+                          return DropdownMenuItem(
+                            value: item,
+                            child: Text(item),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setDialogState(() => ejecucion = value);
+                          }
+                        },
+                      ),
+                      TextField(
+                        controller: responsable,
+                        decoration: const InputDecoration(
+                          labelText: 'Responsable del mantenimiento',
+                        ),
+                      ),
+                      TextField(
+                        controller: kmController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Kilometraje del vehículo',
+                          suffixText: 'km',
+                        ),
+                      ),
+                      TextField(
+                        controller: costoController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Costo (B/.)',
+                          prefixText: 'B/. ',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'El próximo mantenimiento se calculará '
+                        'automáticamente sumando 5,000 km.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ],
                   ),
-
-                const SizedBox(height: 10),
-
-                DropdownButton<String>(
-                  value: _tipoEjecucion,
-                  isExpanded: true,
-                  items: tipoEjecucion.map((t) =>
-                      DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (val) =>
-                      setStateDialog(() => _tipoEjecucion = val!),
                 ),
-
-                TextField(
-                  controller: _responsableController,
-                  decoration: const InputDecoration(labelText: 'Responsable'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
                 ),
-
-                TextField(
-                  controller: _kmController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Kilometraje'),
-                ),
-
-                TextField(
-                  controller: _costoController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Costo'),
-                ),
-
-                const SizedBox(height: 10),
-
-                ElevatedButton(
+                FilledButton(
                   onPressed: () async {
-                    final img = await _seleccionarImagen();
-                    if (img != null) {
-                      setStateDialog(() => _fotoKm = img);
+                    if (vehiculoId == null) {
+                      _mensaje('Seleccione un vehículo.', error: true);
+                      return;
+                    }
+
+                    final km = int.tryParse(kmController.text.trim());
+                    final costo = double.tryParse(
+                      costoController.text.trim().replaceAll(',', '.'),
+                    );
+
+                    if (km == null || km < 0) {
+                      _mensaje('Introduzca un kilometraje válido.', error: true);
+                      return;
+                    }
+
+                    if (costo == null || costo < 0) {
+                      _mensaje('Introduzca un costo válido.', error: true);
+                      return;
+                    }
+
+                    if (responsable.text.trim().isEmpty) {
+                      _mensaje('Escriba el responsable.', error: true);
+                      return;
+                    }
+
+                    try {
+                      final ref = _db.collection('vehiculos').doc(vehiculoId);
+                      final vehiculo = await ref.get();
+
+                      if (!vehiculo.exists) {
+                        _mensaje('El vehículo ya no existe.', error: true);
+                        return;
+                      }
+
+                      final datos = vehiculo.data()!;
+                      final proximoKm = km + intervaloMantenimiento;
+
+                      final registro = _db.collection('mantenimientos').doc();
+
+                      final batch = _db.batch();
+
+                      batch.set(registro, {
+                        'vehiculo_id': vehiculoId,
+                        'placa': datos['placa'] ?? '',
+                        'vehiculo':
+                            '${datos['marca'] ?? ''} ${datos['modelo'] ?? ''}'
+                                .trim(),
+                        'tipo_trabajo': tipo,
+                        'descripcion': tipo == 'Otro'
+                            ? detalleController.text.trim()
+                            : tipo,
+                        'tipo_ejecucion': ejecucion,
+                        'responsable': responsable.text.trim(),
+                        'km': km,
+                        'costo': costo,
+                        'proximo_mantenimiento_km': proximoKm,
+                        'usuario': _usuario(),
+                        'fecha': FieldValue.serverTimestamp(),
+                      });
+
+                      // Actualiza el mantenimiento vigente del vehículo.
+                      // El registro anterior permanece en la colección.
+                      batch.update(ref, {
+                        'ultimo_mantenimiento_km': km,
+                        'proximo_mantenimiento_km': proximoKm,
+                        'fecha_ultimo_mantenimiento':
+                            FieldValue.serverTimestamp(),
+                      });
+
+                      await batch.commit();
+
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext, true);
+                      }
+                    } catch (e) {
+                      _mensaje(
+                        'No se pudo guardar el mantenimiento: $e',
+                        error: true,
+                      );
                     }
                   },
-                  child: const Text('Foto del kilometraje'),
-                ),
-
-                ElevatedButton(
-                  onPressed: () async {
-                    final img = await _seleccionarImagen();
-                    if (img != null) {
-                      setStateDialog(() => _fotosTrabajo.add(img));
-                    }
-                  },
-                  child: const Text('Foto del trabajo'),
-                ),
-
-                ElevatedButton(
-                  onPressed: () async {
-                    final img = await _seleccionarImagen();
-                    if (img != null) {
-                      setStateDialog(() => _fotosPiezas.add(img));
-                    }
-                  },
-                  child: const Text('Foto de piezas'),
+                  child: const Text('Guardar mantenimiento'),
                 ),
               ],
-            ),
-          ),
-          actions: [
+            );
+          },
+        );
+      },
+    );
 
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
+    responsable.dispose();
+    kmController.dispose();
+    costoController.dispose();
+    detalleController.dispose();
 
-            ElevatedButton(
-              onPressed: () async {
+    if (resultado == true) {
+      _mensaje('Mantenimiento guardado. Próximo: +5,000 km.');
+    }
+  }
 
-                if (_vehiculoSeleccionado == null) {
-                  _mostrarError('Seleccione vehículo');
-                  return;
-                }
+  Future<Position?> _obtenerUbicacion() async {
+    try {
+      final habilitado = await Geolocator.isLocationServiceEnabled();
 
-                if (_fotoKm == null) {
-                  _mostrarError('Debe tomar foto del km');
-                  return;
-                }
+      if (!habilitado) {
+        _mensaje('Active el GPS para registrar la ubicación.',
+            error: true);
+        return null;
+      }
 
-                final km = int.tryParse(_kmController.text) ?? 0;
-                final costo = double.tryParse(_costoController.text) ?? 0;
+      LocationPermission permiso = await Geolocator.checkPermission();
 
-                String urlKm = (await _subirImagenes([_fotoKm!])).first;
-                final urlsTrabajo = await _subirImagenes(_fotosTrabajo);
-                final urlsPiezas = await _subirImagenes(_fotosPiezas);
+      if (permiso == LocationPermission.denied) {
+        permiso = await Geolocator.requestPermission();
+      }
 
-                await FirebaseFirestore.instance.collection('mantenimientos').add({
-                  'vehiculo_id': _vehiculoSeleccionado,
-                  'placa': _placaSeleccionada,
-                  'vehiculo': _marcaModelo,
-                  'tipo_trabajo': _tipoTrabajo,
-                  'descripcion': _descripcionController.text,
-                  'tipo_ejecucion': _tipoEjecucion,
-                  'responsable': _responsableController.text,
-                  'km': km,
-                  'costo': costo,
-                  'foto_km': urlKm,
-                  'fotos_trabajo': urlsTrabajo,
-                  'fotos_piezas': urlsPiezas,
-                  'usuario': FirebaseAuth.instance.currentUser?.email,
-                  'fecha': DateTime.now(),
-                });
+      if (permiso == LocationPermission.denied ||
+          permiso == LocationPermission.deniedForever) {
+        _mensaje('No hay permiso para obtener la ubicación GPS.',
+            error: true);
+        return null;
+      }
 
-                Navigator.pop(context);
-              },
-              child: const Text('Guardar'),
-            ),
-          ],
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      _mensaje('No se pudo obtener el GPS: $e', error: true);
+      return null;
+    }
   }
 
-  void _mostrarError(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
-  }
+  Future<void> _reportarDano() async {
+    final descripcion = TextEditingController();
+    final kmController = TextEditingController();
 
-  void _verDetalle(Map<String, dynamic> data) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => _DetalleMantenimiento(data: data),
-      ),
-    );
-  }
+    String? vehiculoId;
+    String gravedad = 'Leve';
 
-  // ================== UI ==================
+    final resultado = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Reportar avería'),
+              content: SizedBox(
+                width: 450,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Si el vehículo se averió en carretera, '
+                        'registre el daño para que el administrador '
+                        'pueda coordinar la atención.',
+                      ),
+                      const SizedBox(height: 12),
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: _db.collection('vehiculos').snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const LinearProgressIndicator();
+                          }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mantenimiento'),
-        backgroundColor: const Color(0xFF003580),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _mostrarFormulario,
-        backgroundColor: const Color(0xFF003580),
-        child: const Icon(Icons.add),
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('mantenimientos')
-            .orderBy('fecha', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
+                          return DropdownButtonFormField<String>(
+                            value: vehiculoId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Vehículo afectado',
+                            ),
+                            items: snapshot.data!.docs.map((doc) {
+                              final v = doc.data();
 
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final docs = snapshot.data!.docs;
-
-          return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, i) {
-              final data = docs[i].data() as Map<String, dynamic>;
-
-              return Card(
-                child: ListTile(
-                  title: Text(data['placa'] ?? ''),
-                  subtitle: Text('${data['tipo_trabajo']} - ${data['km']} km'),
-                  onTap: () => _verDetalle(data),
+                              return DropdownMenuItem(
+                                value: doc.id,
+                                child: Text(
+                                  '${v['placa'] ?? 'Sin placa'} - '
+                                  '${v['marca'] ?? ''} ${v['modelo'] ?? ''}',
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setDialogState(() => vehiculoId = value);
+                            },
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: gravedad,
+                        decoration: const InputDecoration(
+                          labelText: 'Gravedad del daño',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'Leve',
+                            child: Text('Leve'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Moderado',
+                            child: Text('Moderado'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Grave',
+                            child: Text('Grave'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setDialogState(() => gravedad = value);
+                          }
+                        },
+                      ),
+                      TextField(
+                        controller: descripcion,
+                        minLines: 3,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          labelText: 'Describa el daño',
+                          hintText:
+                              'Ej.: neumático pinchado, motor recalentado...',
+                        ),
+                      ),
+                      TextField(
+                        controller: kmController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Kilometraje actual (si lo conoce)',
+                          suffixText: 'km',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Se intentará guardar la ubicación GPS del reporte. '
+                        'La ubicación depende del permiso y de la señal GPS.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
-              );
-            },
-          );
-        },
-      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton.icon(
+                  icon: const Icon(Icons.location_on),
+                  label: const Text('Enviar al administrador'),
+                  onPressed: () async {
+                    if (vehiculoId == null) {
+                      _mensaje('Seleccione el vehículo.', error: true);
+                      return;
+                    }
+
+                    if (descripcion.text.trim().isEmpty) {
+                      _mensaje('Describa el daño.', error: true);
+                      return;
+                    }
+
+                    final kmTexto = kmController.text.trim();
+                    final km = kmTexto.isEmpty
+                        ? null
+                        : int.tryParse(kmTexto);
+
+                    if (kmTexto.isNotEmpty && (km == null || km < 0)) {
+                      _mensaje('El kilometraje no es válido.', error: true);
+                      return;
+                    }
+
+                    try {
+                      // Intentar GPS. Si falla, el reporte se conserva
+                      // sin coordenadas para no perder la emergencia.
+                      final posicion = await _obtenerUbicacion();
+
+                      final vehiculo =
+                          await _db.collection('vehiculos').doc(vehiculoId).get();
+
+                      if (!vehiculo.exists) {
+                        _mensaje('El vehículo ya no existe.', error: true);
+                        return;
+                      }
+
+                      final v = vehiculo.data()!;
+                      final reporteRef =
+                          _db.collection('reportes_danos').doc();
+
+                      final mensaje =
+                          'Avería ${gravedad.toLowerCase()} en '
+                          '${v['placa'] ?? 'vehículo sin placa'}.';
+
+                      final batch = _db.batch();
+
+                      batch.set(reporteRef, {
+                        'vehiculo_id': vehiculoId,
+                        'placa': v['placa'] ?? '',
+                        'vehiculo':
+                            '${v['marca'] ?? ''} ${v['modelo'] ?? ''}'.trim(),
+                        'gravedad': gravedad,
+                        'descripcion': descripcion.text.trim(),
+                        'kilometraje': km,
+                        'latitud': posicion?.latitude,
+                        'longitud': posicion?.longitude,
+                        'ubicacion': posicion == null
+                            ? null
+                            : GeoPoint(
+                                posicion.latitude,
+                                posicion.longitude,
+                              ),
+                        'ubicacion_disponible': posicion != null,
+                        'fecha': FieldValue.serverTimestamp(),
+                        'reportado_por': _usuario(),
+                        'usuario_uid':
+                            FirebaseAuth.instance.currentUser?.uid,
+                        'estado': 'Pendiente',
+                        'destinatario': 'admin',
+                      });
+
+                      // Aviso dirigido al área administradora de la flota.
+                      batch.set(_db.collection('avisos_admin').doc(), {
+                        'tipo': 'averia_vehiculo',
+                        'titulo': 'Reporte de avería: ${v['placa'] ?? ''}',
+                        'mensaje': mensaje,
+                        'reporte_id': reporteRef.id,
+                        'placa': v['placa'] ?? '',
+                        'gravedad': gravedad,
+                        'destinatario': 'admin',
+                        'leido': false,
+                        'fecha': FieldValue.serverTimestamp(),
+                      });
+
+                      await batch.commit();
+
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext, true);
+                      }
+                    } catch (e) {
+                      _mensaje('No se pudo enviar el reporte: $e',
+                          error: true);
+                    }
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
+
+    descripcion.dispose();
+    kmController.dispose();
+
+    if (resultado == true) {
+      _mensaje('Reporte registrado y aviso creado para el administrador.');
+    }
   }
-}
 
-// ================== DETALLE ==================
+  Color _colorEstado(int? restante) {
+    if (restante == null) return Colors.blueGrey;
+    if (restante <= 0) return Colors.red;
+    if (restante <= 500) return Colors.orange;
+    return Colors.green;
+  }
 
-class _DetalleMantenimiento extends StatelessWidget {
+  String _estadoMantenimiento(int? restante) {
+    if (restante == null) return 'Sin kilometraje actual registrado';
+    if (restante < 0) {
+      return 'MANTENIMIENTO VENCIDO por ${restante.abs()} km';
+    }
+    if (restante == 0) return 'MANTENIMIENTO VENCE AHORA';
+    if (restante <= 500) return 'Próximo mantenimiento: faltan $restante km';
+    return 'Faltan $restante km para el próximo mantenimiento';
+  }
 
-  final Map<String, dynamic> data;
+  Widget _tarjetaVehiculo(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final v = doc.data();
+    final placa = v['placa']?.toString() ?? 'Sin placa';
+    final actual = _kmActual(v);
+    final proximo = _numero(v['proximo_mantenimiento_km']);
+    final ultimo = _numero(v['ultimo_mantenimiento_km']);
 
-  const _DetalleMantenimiento({required this.data});
+    final restante =
+        actual != null && proximo != null ? proximo - actual : null;
 
-  @override
-  Widget build(BuildContext context) {
+    final color = _colorEstado(restante);
 
-    final fotosTrabajo = List<String>.from(data['fotos_trabajo'] ?? []);
-    final fotosPiezas = List<String>.from(data['fotos_piezas'] ?? []);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detalle'),
-        backgroundColor: const Color(0xFF003580),
-      ),
-      body: SingleChildScrollView(
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
-            Text('Vehículo: ${data['vehiculo']}'),
-            Text('Tipo: ${data['tipo_trabajo']}'),
-            Text('Km: ${data['km']}'),
-            Text('Responsable: ${data['responsable']}'),
-
-            const SizedBox(height: 10),
-
-            if (data['foto_km'] != null)
-              Image.network(data['foto_km']),
-
-            const SizedBox(height: 10),
-
-            const Text('Trabajo realizado'),
-            ...fotosTrabajo.map((url) => Image.network(url)),
-
-            const SizedBox(height: 10),
-
-            const Text('Piezas'),
-            ...fotosPiezas.map((url) => Image.network(url)),
+            Row(
+              children: [
+                const Icon(Icons.directions_car, color: azul, size: 30),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '$placa - ${v['marca'] ?? ''} ${v['modelo'] ?? ''}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text('Kilometraje actual: ${actual ?? 'No registrado'} km'),
+            Text('Último mantenimiento: ${ultimo ?? 'No registrado'} km'),
+            Text('Próximo mantenimiento: ${proximo ?? 'No programado'} km'),
+            const SizedBox(height: 8),
+            if (proximo != null && actual != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  minHeight: 9,
+                  value: ((actual / proximo).clamp(0, 1)).toDouble(),
+                  color: color,
+                  backgroundColor: Colors.grey.shade300,
+                ),
+              ),
+            const SizedBox(height: 7),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.notification_important, color: color),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _estadoMantenimiento(restante),
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (actual == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text(
+                  'Actualice el kilometraje del vehículo desde el registro '
+                  'de recorridos para calcular la alerta.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _seccionTitulo(String texto, IconData icono) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Row(
+        children: [
+          Icon(icono, color: azul),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              texto,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: azul,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Mantenimiento y averías'),
+        backgroundColor: azul,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: 'Registrar mantenimiento',
+            onPressed: _registrarMantenimiento,
+            icon: const Icon(Icons.build),
+          ),
+          IconButton(
+            tooltip: 'Reportar avería',
+            onPressed: _reportarDano,
+            icon: const Icon(Icons.warning_amber),
+          ),
+        ],
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'averia',
+            onPressed: _reportarDano,
+            backgroundColor: Colors.red.shade700,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.warning_amber),
+            label: const Text('Reportar avería'),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            heroTag: 'mantenimiento',
+            onPressed: _registrarMantenimiento,
+            backgroundColor: dorado,
+            foregroundColor: Colors.black,
+            icon: const Icon(Icons.add_task),
+            label: const Text('Mantenimiento'),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 100),
+        children: [
+          _seccionTitulo(
+            'Estado preventivo de la flota',
+            Icons.speed,
+          ),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _db.collection('vehiculos').snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No se pudo cargar la flota.'),
+                );
+              }
+
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final vehiculos = snapshot.data!.docs;
+
+              if (vehiculos.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Todavía no hay vehículos registrados.'),
+                );
+              }
+
+              return Column(
+                children: vehiculos.map(_tarjetaVehiculo).toList(),
+              );
+            },
+          ),
+          _seccionTitulo(
+            'Reportes de averías pendientes',
+            Icons.notification_important,
+          ),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _db
+                .collection('reportes_danos')
+                .where('estado', isEqualTo: 'Pendiente')
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No se pudieron cargar los reportes.'),
+                );
+              }
+
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final reportes = snapshot.data!.docs;
+
+              if (reportes.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No hay averías pendientes registradas.'),
+                );
+              }
+
+              return Column(
+                children: reportes.map((doc) {
+                  final d = doc.data();
+                  final grave = d['gravedad'] == 'Grave';
+                  final moderado = d['gravedad'] == 'Moderado';
+
+                  final color = grave
+                      ? Colors.red
+                      : moderado
+                          ? Colors.orange
+                          : Colors.blueGrey;
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    child: ListTile(
+                      leading: Icon(Icons.warning_amber, color: color),
+                      title: Text(
+                        '${d['placa'] ?? 'Sin placa'} · '
+                        '${d['gravedad'] ?? 'Sin gravedad'}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        '${d['descripcion'] ?? ''}\n'
+                        'Reportado: ${d['reportado_por'] ?? 'No identificado'}\n'
+                        '${_fecha(d['fecha'])}',
+                      ),
+                      isThreeLine: true,
+                      trailing: d['ubicacion_disponible'] == true
+                          ? const Icon(Icons.location_on, color: Colors.green)
+                          : const Icon(
+                              Icons.location_off,
+                              color: Colors.grey,
+                            ),
+                      onTap: () => _mostrarDetalleAveria(doc.id, d),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+          _seccionTitulo(
+            'Historial de mantenimientos',
+            Icons.history,
+          ),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _db
+                .collection('mantenimientos')
+                .orderBy('fecha', descending: true)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No se pudo cargar el historial.'),
+                );
+              }
+
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final docs = snapshot.data!.docs;
+
+              if (docs.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Todavía no hay mantenimientos registrados.'),
+                );
+              }
+
+              return Column(
+                children: docs.map((doc) {
+                  final d = doc.data();
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    child: ListTile(
+                      leading: const CircleAvatar(
+                        backgroundColor: azul,
+                        foregroundColor: Colors.white,
+                        child: Icon(Icons.build),
+                      ),
+                      title: Text(
+                        '${d['placa'] ?? ''} · ${d['tipo_trabajo'] ?? ''}',
+                      ),
+                      subtitle: Text(
+                        'Kilometraje: ${d['km'] ?? '—'} km\n'
+                        'Próximo: ${d['proximo_mantenimiento_km'] ?? '—'} km\n'
+                        'Fecha: ${_fecha(d['fecha'])}',
+                      ),
+                      isThreeLine: true,
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _mostrarDetalleMantenimiento(d),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _mostrarDetalleMantenimiento(Map<String, dynamic> d) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Mantenimiento ${d['placa'] ?? ''}'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Vehículo: ${d['vehiculo'] ?? ''}'),
+              Text('Trabajo: ${d['tipo_trabajo'] ?? ''}'),
+              Text('Detalle: ${d['descripcion'] ?? ''}'),
+              Text('Responsable: ${d['responsable'] ?? ''}'),
+              Text('Kilometraje: ${d['km'] ?? ''} km'),
+              Text(
+                'Próximo mantenimiento: '
+                '${d['proximo_mantenimiento_km'] ?? '—'} km',
+              ),
+              Text('Costo: B/. ${_dinero(d['costo']).toStringAsFixed(2)}'),
+              Text('Fecha y hora: ${_fecha(d['fecha'])}'),
+              Text('Registrado por: ${d['usuario'] ?? ''}'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _mostrarDetalleAveria(String id, Map<String, dynamic> d) {
+    final lat = d['latitud'];
+    final lon = d['longitud'];
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Avería: ${d['placa'] ?? ''}'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Gravedad: ${d['gravedad'] ?? ''}'),
+              Text('Descripción: ${d['descripcion'] ?? ''}'),
+              Text('Kilometraje: ${d['kilometraje'] ?? 'No informado'}'),
+              Text('Reportado por: ${d['reportado_por'] ?? ''}'),
+              Text('Fecha: ${_fecha(d['fecha'])}'),
+              const SizedBox(height: 10),
+              if (lat != null && lon != null)
+                SelectableText('Coordenadas GPS: $lat, $lon')
+              else
+                const Text('El reporte no tiene coordenadas GPS.'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cerrar'),
+          ),
+          if (lat != null && lon != null)
+            TextButton(
+              onPressed: () {
+                // Copia las coordenadas para abrirlas en un mapa.
+                // No requiere paquete adicional.
+                Navigator.pop(dialogContext);
+                _mensaje('Coordenadas GPS: $lat, $lon');
+              },
+              child: const Text('Ver coordenadas'),
+            ),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await _db.collection('reportes_danos').doc(id).update({
+                  'estado': 'Atendido',
+                  'atendido_por': _usuario(),
+                  'fecha_atencion': FieldValue.serverTimestamp(),
+                });
+
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+
+                _mensaje('Reporte marcado como atendido.');
+              } catch (e) {
+                _mensaje('No se pudo actualizar el reporte: $e',
+                    error: true);
+              }
+            },
+            child: const Text('Marcar atendido'),
+          ),
+        ],
       ),
     );
   }

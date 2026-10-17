@@ -1,9 +1,10 @@
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:provider/provider.dart';
+
 import 'firebase_options.dart';
 import 'vehiculos_page.dart';
 import 'combustible_page.dart';
@@ -12,50 +13,80 @@ import 'mantenimiento_page.dart';
 import 'estadisticas_page.dart';
 import 'usuario_provider.dart';
 
-import 'danos_page.dart';
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(
     MultiProvider(
-      providers: [ChangeNotifierProvider(create: (_) => UsuarioProvider())],
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) => UsuarioProvider(),
+        ),
+      ],
       child: const MyApp(),
     ),
   );
 }
 
-// ─── PALETA INSTITUCIONAL ─────────────────────────────────────────────────────
-const kNavy = Color(0xFF002B6E);
-const kNavyLight = Color(0xFF003D99);
-const kGold = Color(0xFFE5A800);
-const kGoldLight = Color(0xFFFFC825);
-const kSurface = Color(0xFFF4F6FB);
+// ───────────── PALETA VISUAL ─────────────
+
+const kNavy = Color(0xFF0B1730);
+const kNavyLight = Color(0xFF142A4D);
+const kGold = Color(0xFFD4AF37);
+const kGoldLight = Color(0xFFFFD76A);
+const kSurface = Color(0xFFF3F6FC);
 const kCardBg = Colors.white;
-const kTextDark = Color(0xFF0D1B3E);
-const kTextMuted = Color(0xFF6B7A99);
-// ─── APP ──────────────────────────────────────────────────────────────────────
+const kTextDark = Color(0xFF17243B);
+const kTextMuted = Color(0xFF718096);
+
+const kEslogan =
+    'Tecnología al servicio de una flota eficiente y responsable.';
+const kPieSistema = 'Sistema interno de gestión vehicular';
+
+// ───────────── APLICACIÓN ─────────────
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Ministerio Público CBT',
+      title: 'Control de Flota Vehicular',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: kNavy),
         useMaterial3: true,
         fontFamily: 'Roboto',
+        scaffoldBackgroundColor: kSurface,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: kNavy,
+          primary: kNavy,
+          secondary: kGold,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: kNavy,
+          foregroundColor: Colors.white,
+          centerTitle: false,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
       ),
       home: const LoginPage(),
     );
   }
 }
 
-// ─── LOGIN ────────────────────────────────────────────────────────────────────
+// ───────────── INICIO DE SESIÓN ─────────────
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
+
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
@@ -63,54 +94,77 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
   bool _cargando = false;
   bool _verClave = false;
   String _error = '';
 
   Future<void> _ingresar() async {
+    if (_emailController.text.trim().isEmpty ||
+        _passwordController.text.isEmpty) {
+      setState(() => _error = 'Introduzca su usuario y contraseña.');
+      return;
+    }
+
     setState(() {
       _cargando = true;
       _error = '';
     });
-    try {
-      final userCredential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
-            email: _emailController.text.trim(),
-            password: _passwordController.text.trim(),
-          );
-      if (!mounted) return;
 
-      final doc = await FirebaseFirestore.instance
+    try {
+      final credencial = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      final uid = credencial.user?.uid;
+
+      if (uid == null) {
+        throw Exception('No se pudo identificar al usuario.');
+      }
+
+      final adminDoc = await FirebaseFirestore.instance
           .collection('admins')
-          .doc(userCredential.user?.uid)
+          .doc(uid)
           .get();
 
       if (!mounted) return;
 
-      final usuarioProvider = Provider.of<UsuarioProvider>(
+      Provider.of<UsuarioProvider>(
         context,
         listen: false,
+      ).setUsuario(
+        _emailController.text.trim(),
+        adminDoc.exists,
       );
 
-      usuarioProvider.setUsuario(_emailController.text.trim(), doc.exists);
-
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const PantallaPrincipal()),
-        );
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const PantallaPrincipal(),
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'network-request-failed') {
+        setState(() => _error = 'Compruebe su conexión a internet.');
+      } else {
+        setState(() => _error = 'Correo o contraseña incorrectos.');
       }
     } catch (_) {
-      setState(() {
-        _error = 'Correo o contraseña incorrectos';
-      });
+      setState(() => _error = 'No se pudo iniciar sesión.');
     } finally {
       if (mounted) {
-        setState(() {
-          _cargando = false;
-        });
+        setState(() => _cargando = false);
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   @override
@@ -118,251 +172,265 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: Stack(
         children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [kNavy, Color(0xFF001A4D), Color(0xFF004080)],
-              ),
-            ),
-          ),
-          Opacity(
-            opacity: 0.06,
-            child: CustomPaint(
-              painter: _DotPatternPainter(),
-              size: Size.infinite,
-            ),
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(height: 4, color: kGold),
-          ),
-          SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 28,
-                  vertical: 40,
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 108,
-                      height: 108,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: kGold, width: 2.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: kGold.withOpacity(0.3),
-                            blurRadius: 20,
-                            spreadRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: ClipOval(
-                        child: Image.asset(
-                          'assets/logo.png',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'CONTROL DE FLOTA VEHICULAR',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 2.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(width: 30, height: 1.5, color: kGold),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Bocas del Toro',
-                          style: TextStyle(
-                            color: kGoldLight,
-                            fontSize: 14,
-                            letterSpacing: 1.2,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(width: 30, height: 1.5, color: kGold),
-                      ],
-                    ),
-                    const SizedBox(height: 38),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.15),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 24,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 3,
-                                height: 18,
-                                decoration: BoxDecoration(
-                                  color: kGold,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Acceso al sistema',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          _CampoTexto(
-                            controller: _emailController,
-                            label: 'Correo institucional',
-                            icono: Icons.alternate_email_rounded,
-                            teclado: TextInputType.emailAddress,
-                          ),
-                          const SizedBox(height: 14),
-                          _CampoTexto(
-                            controller: _passwordController,
-                            label: 'Contraseña',
-                            icono: Icons.lock_outline_rounded,
-                            oculto: !_verClave,
-                            sufijo: IconButton(
-                              icon: Icon(
-                                _verClave
-                                    ? Icons.visibility_off_rounded
-                                    : Icons.visibility_rounded,
-                                color: Colors.white54,
-                                size: 20,
-                              ),
-                              onPressed: () =>
-                                  setState(() => _verClave = !_verClave),
-                            ),
-                          ),
-                          if (_error.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.red.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: Colors.red.withOpacity(0.4),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.warning_amber_rounded,
-                                    color: Colors.redAccent,
-                                    size: 16,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    _error,
-                                    style: const TextStyle(
-                                      color: Colors.redAccent,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 22),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 50,
-                            child: ElevatedButton(
-                              onPressed: _cargando ? null : _ingresar,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kGold,
-                                foregroundColor: kNavy,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              child: _cargando
-                                  ? const SizedBox(
-                                      width: 22,
-                                      height: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        color: kNavy,
-                                      ),
-                                    )
-                                  : const Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.login_rounded, size: 18),
-                                        SizedBox(width: 8),
-                                        Text(
-                                          'INGRESAR',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 1.5,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    const Text(
-                      'Tecnología al servicio de una flota eficiente y responsable.',
-                      style: TextStyle(color: Colors.white38, fontSize: 11, fontStyle: FontStyle.italic),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Sistema Interno de Gestión Vehicular',
-                      style: TextStyle(color: Colors.white24, fontSize: 10),
-                    ),
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    kNavy,
+                    Color(0xFF10294D),
+                    Color(0xFF061124),
                   ],
                 ),
               ),
             ),
           ),
-          Positioned(
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _DotPatternPainter(),
+              ),
+            ),
+          ),
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: ColoredBox(
+              color: kGold,
+              child: SizedBox(height: 4),
+            ),
+          ),
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 32,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 430),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: kGold,
+                            width: 3,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: kGold.withOpacity(0.2),
+                              blurRadius: 24,
+                              spreadRadius: 3,
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.all(5),
+                        child: ClipOval(
+                          child: Image.asset(
+                            'assets/logo.png',
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Icon(
+                              Icons.directions_car_rounded,
+                              color: kNavy,
+                              size: 48,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      const Text(
+                        'CONTROL DE FLOTA VEHICULAR',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          height: 1.3,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        width: 60,
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: kGold,
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        kEslogan,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: kGoldLight,
+                          fontSize: 13,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Container(
+                        padding: const EdgeInsets.all(22),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.97),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.5),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 28,
+                              offset: const Offset(0, 12),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(
+                                  Icons.lock_outline_rounded,
+                                  color: kNavy,
+                                  size: 22,
+                                ),
+                                SizedBox(width: 10),
+                                Text(
+                                  'Acceso al sistema',
+                                  style: TextStyle(
+                                    color: kTextDark,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 22),
+                            _CampoTexto(
+                              controller: _emailController,
+                              label: 'Usuario o correo',
+                              icono: Icons.person_outline_rounded,
+                              teclado: TextInputType.emailAddress,
+                            ),
+                            const SizedBox(height: 16),
+                            _CampoTexto(
+                              controller: _passwordController,
+                              label: 'Contraseña',
+                              icono: Icons.lock_outline_rounded,
+                              oculto: !_verClave,
+                              sufijo: IconButton(
+                                tooltip: _verClave
+                                    ? 'Ocultar contraseña'
+                                    : 'Mostrar contraseña',
+                                icon: Icon(
+                                  _verClave
+                                      ? Icons.visibility_off_rounded
+                                      : Icons.visibility_rounded,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _verClave = !_verClave;
+                                  });
+                                },
+                              ),
+                              alEnviar: _ingresar,
+                            ),
+                            if (_error.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFEEEE),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: Colors.red.shade200,
+                                  ),
+                                ),
+                                child: Text(
+                                  _error,
+                                  style: TextStyle(
+                                    color: Colors.red.shade800,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 22),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 52,
+                              child: FilledButton(
+                                onPressed: _cargando ? null : _ingresar,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: kGold,
+                                  foregroundColor: kNavy,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: _cargando
+                                    ? const SizedBox(
+                                        width: 23,
+                                        height: 23,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          color: kNavy,
+                                        ),
+                                      )
+                                    : const Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.login_rounded),
+                                          SizedBox(width: 10),
+                                          Text(
+                                            'INGRESAR',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w900,
+                                              letterSpacing: 1.2,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      const Text(
+                        kPieSistema,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const Positioned(
             bottom: 0,
             left: 0,
             right: 0,
-            child: Container(height: 3, color: kGold.withOpacity(0.6)),
+            child: ColoredBox(
+              color: kGold,
+              child: SizedBox(height: 3),
+            ),
           ),
         ],
       ),
@@ -370,7 +438,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
-// ─── CAMPO TEXTO REUTILIZABLE ─────────────────────────────────────────────────
+// ───────────── CAMPO REUTILIZABLE ─────────────
+
 class _CampoTexto extends StatelessWidget {
   final TextEditingController controller;
   final String label;
@@ -378,6 +447,7 @@ class _CampoTexto extends StatelessWidget {
   final bool oculto;
   final TextInputType teclado;
   final Widget? sufijo;
+  final VoidCallback? alEnviar;
 
   const _CampoTexto({
     required this.controller,
@@ -386,6 +456,7 @@ class _CampoTexto extends StatelessWidget {
     this.oculto = false,
     this.teclado = TextInputType.text,
     this.sufijo,
+    this.alEnviar,
   });
 
   @override
@@ -394,55 +465,70 @@ class _CampoTexto extends StatelessWidget {
       controller: controller,
       obscureText: oculto,
       keyboardType: teclado,
-      style: const TextStyle(color: Colors.white, fontSize: 14),
-      cursorColor: kGoldLight,
+      textInputAction:
+          oculto ? TextInputAction.done : TextInputAction.next,
+      onSubmitted: oculto ? (_) => alEnviar?.call() : null,
+      style: const TextStyle(
+        color: kTextDark,
+        fontSize: 14,
+      ),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
-        prefixIcon: Icon(icono, color: kGoldLight, size: 20),
+        prefixIcon: Icon(icono, color: kNavy),
         suffixIcon: sufijo,
         filled: true,
-        fillColor: Colors.white.withOpacity(0.06),
+        fillColor: const Color(0xFFF5F7FB),
         contentPadding: const EdgeInsets.symmetric(
-          vertical: 14,
+          vertical: 16,
           horizontal: 12,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.white24),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: Color(0xFFDDE3EE),
+          ),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: kGoldLight, width: 1.5),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: kNavy,
+            width: 1.5,
+          ),
         ),
       ),
     );
   }
 }
 
-// ─── PATRÓN DE PUNTOS ─────────────────────────────────────────────────────────
+// ───────────── PATRÓN DE FONDO ─────────────
+
 class _DotPatternPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white;
-    const gap = 22.0;
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.06);
+
+    const gap = 24.0;
+
     for (double x = 0; x < size.width; x += gap) {
       for (double y = 0; y < size.height; y += gap) {
-        canvas.drawCircle(Offset(x, y), 1.2, paint);
+        canvas.drawCircle(Offset(x, y), 1.1, paint);
       }
     }
   }
 
   @override
-  bool shouldRepaint(_) => false;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// ─── HOME ─────────────────────────────────────────────────────────────────────
+// ───────────── MENÚ PRINCIPAL ─────────────
+
 class PantallaPrincipal extends StatelessWidget {
   const PantallaPrincipal({super.key});
 
   String get _saludo {
     final hora = DateTime.now().hour;
+
     if (hora < 12) return 'Buenos días';
     if (hora < 18) return 'Buenas tardes';
     return 'Buenas noches';
@@ -450,206 +536,394 @@ class PantallaPrincipal extends StatelessWidget {
 
   String get _usuarioNombre {
     final user = FirebaseAuth.instance.currentUser;
-    return user?.displayName ?? user?.email?.split('@').first ?? 'Usuario';
+    return user?.displayName ??
+        user?.email?.split('@').first ??
+        'Usuario';
+  }
+
+  Future<void> _cerrarSesion(BuildContext context) async {
+    await FirebaseAuth.instance.signOut();
+
+    if (!context.mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final usuarioProvider = Provider.of<UsuarioProvider>(context);
+    final usuario = context.watch<UsuarioProvider>();
+    final esAdmin = usuario.isAdmin;
+
+    final modulos = <_ModuloInfo>[
+      if (esAdmin)
+        _ModuloInfo(
+          titulo: 'Vehículos',
+          descripcion: 'Registro y control de la flota',
+          icono: Icons.directions_car_rounded,
+          color: const Color(0xFF2864C5),
+          pagina: VehiculosPage(),
+        ),
+      _ModuloInfo(
+        titulo: 'Combustible',
+        descripcion: 'Cargas, consumo y costos',
+        icono: Icons.local_gas_station_rounded,
+        color: const Color(0xFF16805A),
+        pagina: CombustiblePage(),
+      ),
+      _ModuloInfo(
+        titulo: 'Recorridos',
+        descripcion: 'Salidas, destinos y kilometraje',
+        icono: Icons.route_rounded,
+        color: const Color(0xFFB56A18),
+        pagina: RecorridosPage(),
+      ),
+      _ModuloInfo(
+        titulo: 'Mantenimiento',
+        descripcion: 'Servicios, averías y alertas',
+        icono: Icons.build_circle_rounded,
+        color: const Color(0xFF7851B8),
+        pagina: MantenimientoPage(),
+      ),
+      if (esAdmin)
+        _ModuloInfo(
+          titulo: 'Estadísticas',
+          descripcion: 'Indicadores y reportes de la flota',
+          icono: Icons.query_stats_rounded,
+          color: const Color(0xFF147D9B),
+          pagina: EstadisticasPage(),
+        ),
+    ];
 
     return Scaffold(
       backgroundColor: kSurface,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(64),
-        child: Container(
-          decoration: const BoxDecoration(
+      appBar: AppBar(
+        toolbarHeight: 72,
+        elevation: 0,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [kNavy, kNavyLight],
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x40000000),
-                blurRadius: 12,
-                offset: Offset(0, 3),
-              ),
-            ],
           ),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
+        ),
+        titleSpacing: 16,
+        title: Row(
+          children: [
+            Container(
+              width: 43,
+              height: 43,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(color: kGold, width: 1.5),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
+                child: Image.asset(
+                  'assets/logo.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.directions_car_rounded,
+                    color: kNavy,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 11),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Image.asset('assets/logo.png', height: 38),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'CONTROL DE FLOTA VEHICULAR',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                        Text(
-                          'Bocas del Toro',
-                          style: TextStyle(color: kGoldLight, fontSize: 11),
-                        ),
-                      ],
+                  Text(
+                    'CONTROL DE FLOTA',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.logout_rounded,
-                      color: Colors.white70,
-                      size: 22,
+                  Text(
+                    'VEHICULAR',
+                    style: TextStyle(
+                      color: kGoldLight,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.7,
                     ),
-                    tooltip: 'Cerrar sesión',
-                    onPressed: () async {
-                      await FirebaseAuth.instance.signOut();
-                      if (context.mounted) {
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (_) => const LoginPage()),
-                        );
-                      }
-                    },
                   ),
                 ],
               ),
             ),
-          ),
+          ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Cerrar sesión',
+            onPressed: () => _cerrarSesion(context),
+            icon: const Icon(Icons.logout_rounded),
+          ),
+          const SizedBox(width: 5),
+        ],
       ),
       body: Column(
         children: [
+          // Encabezado de bienvenida
           Container(
             width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(22, 23, 22, 25),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [kNavy, Color(0xFF004DA0)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
+                colors: [
+                  kNavy,
+                  Color(0xFF173A69),
+                  Color(0xFF214A7D),
+                ],
+              ),
+              borderRadius: BorderRadius.only(
+                bottomLeft: Radius.circular(25),
+                bottomRight: Radius.circular(25),
               ),
             ),
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 36,
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: kGold,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+                Row(
+                  children: [
+                    Container(
+                      width: 4,
+                      height: 43,
+                      decoration: BoxDecoration(
+                        color: kGold,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    const SizedBox(width: 13),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$_saludo,',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            _usuarioNombre,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: esAdmin
+                            ? kGold.withOpacity(0.18)
+                            : Colors.white.withOpacity(0.10),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: esAdmin
+                              ? kGold.withOpacity(0.7)
+                              : Colors.white24,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            esAdmin
+                                ? Icons.admin_panel_settings_rounded
+                                : Icons.person_outline_rounded,
+                            color: esAdmin ? kGoldLight : Colors.white,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            esAdmin ? 'Administrador' : 'Conductor',
+                            style: TextStyle(
+                              color: esAdmin ? kGoldLight : Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  '$_saludo,',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                Text(
-                  _usuarioNombre,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 19),
                 const Text(
-                  'Gestión Vehicular Institucional',
+                  kEslogan,
                   style: TextStyle(
-                    color: kGoldLight,
-                    fontSize: 11,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w500,
+                    color: Colors.white,
+                    fontSize: 13,
+                    height: 1.5,
                   ),
                 ),
               ],
             ),
           ),
-          Container(height: 3, color: kGold),
-          Expanded(
-            child: GridView(
-              padding: const EdgeInsets.all(16),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 200,
-                childAspectRatio: 0.95,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-              ),
+
+          // Título del menú
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 23, 20, 13),
+            child: Row(
               children: [
-                if (usuarioProvider.isAdmin)
-                  _ModuloCard(
-                    icono: Icons.directions_car_rounded,
-                    titulo: 'Vehículos',
-                    descripcion: 'Registro y control',
-                    color: const Color(0xFF0050C8),
-                    pagina: VehiculosPage(),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Módulos del sistema',
+                        style: TextStyle(
+                          color: kTextDark,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        esAdmin
+                            ? 'Administra y supervisa la flota'
+                            : 'Selecciona la operación que necesitas',
+                        style: const TextStyle(
+                          color: kTextMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
-                _ModuloCard(
-                  icono: Icons.local_gas_station_rounded,
-                  titulo: 'Combustible',
-                  descripcion: 'Consumo y reportes',
-                  color: const Color(0xFF007A3D),
-                  pagina: CombustiblePage(),
                 ),
-                _ModuloCard(
-                  icono: Icons.map_rounded,
-                  titulo: 'Recorridos',
-                  descripcion: 'Rutas y bitácoras',
-                  color: const Color(0xFF8B4500),
-                  pagina: RecorridosPage(),
-                ),
-                _ModuloCard(
-                  icono: Icons.build_circle_rounded,
-                  titulo: 'Mantenimiento',
-                  descripcion: 'Servicios y talleres',
-                  color: const Color(0xFF6A1B9A),
-                  pagina: MantenimientoPage(),
-                ),
-                _ModuloCard(
-                  icono: Icons.bar_chart_rounded,
-                  titulo: 'Estadísticas',
-                  descripcion: 'Dashboard y reportes',
-                  color: const Color(0xFFE5A800),
-                  pagina: EstadisticasPage(), // ✅ CORREGIDO: sin "const"
-                ),
-                _ModuloCard(
-                  icono: Icons.car_crash_rounded,
-                  titulo: 'Daños',
-                  descripcion: 'Incidentes y daños',
-                  color: const Color(0xFFC62828),
-                  pagina: DanosPage(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFFE0E6F0)),
+                  ),
+                  child: Text(
+                    '${modulos.length} módulos',
+                    style: const TextStyle(
+                      color: kNavy,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
+
+          // Tarjetas adaptables al tamaño de pantalla
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final ancho = constraints.maxWidth;
+
+                final columnas = ancho >= 1050
+                    ? 4
+                    : ancho >= 700
+                        ? 3
+                        : ancho >= 430
+                            ? 2
+                            : 1;
+
+                final proporcion = columnas == 1 ? 2.15 : 1.05;
+
+                return GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(18, 4, 18, 22),
+                  itemCount: modulos.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: columnas,
+                    childAspectRatio: proporcion,
+                    crossAxisSpacing: 14,
+                    mainAxisSpacing: 14,
+                  ),
+                  itemBuilder: (context, index) {
+                    final modulo = modulos[index];
+
+                    return _ModuloCard(
+                      modulo: modulo,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => modulo.pagina,
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+
+          // Pie de pantalla
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            color: kNavy,
-            child: const Column(
-              children: [
-                Text(
-                  'Tecnología al servicio de una flota eficiente y responsable.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white38, fontSize: 10),
+            padding: const EdgeInsets.fromLTRB(12, 13, 12, 15),
+            decoration: const BoxDecoration(
+              color: kNavy,
+              border: Border(
+                top: BorderSide(
+                  color: kGold,
+                  width: 2,
                 ),
-                Text(
-                  'Sistema de gestión de flota vehicular',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white24, fontSize: 9),
-                ),
-              ],
+              ),
+            ),
+            child: const SafeArea(
+              top: false,
+              child: Column(
+                children: [
+                  Text(
+                    kPieSistema,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'CONTROL Y SEGUIMIENTO DE LA FLOTA',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: kGoldLight,
+                      fontSize: 9,
+                      letterSpacing: 1.3,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -658,102 +932,113 @@ class PantallaPrincipal extends StatelessWidget {
   }
 }
 
-// ─── CARD DE MÓDULO ───────────────────────────────────────────────────────────
-class _ModuloCard extends StatelessWidget {
-  final IconData icono;
+// ───────────── DATOS DE CADA MÓDULO ─────────────
+
+class _ModuloInfo {
   final String titulo;
   final String descripcion;
+  final IconData icono;
   final Color color;
-  final Widget? pagina;
+  final Widget pagina;
 
-  const _ModuloCard({
-    required this.icono,
+  const _ModuloInfo({
     required this.titulo,
     required this.descripcion,
+    required this.icono,
     required this.color,
-    this.pagina,
+    required this.pagina,
+  });
+}
+
+// ───────────── TARJETA DEL MENÚ ─────────────
+
+class _ModuloCard extends StatelessWidget {
+  final _ModuloInfo modulo;
+  final VoidCallback onTap;
+
+  const _ModuloCard({
+    super.key,
+    required this.modulo,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bool activo = pagina != null;
-
     return Material(
       color: kCardBg,
-      borderRadius: BorderRadius.circular(14),
-      elevation: activo ? 3 : 1,
-      shadowColor: color.withOpacity(0.3),
+      borderRadius: BorderRadius.circular(19),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: activo
-            ? () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => pagina!),
-              )
-            : null,
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(19),
         child: Container(
+          padding: const EdgeInsets.all(17),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border(top: BorderSide(color: color, width: 3.5)),
+            borderRadius: BorderRadius.circular(19),
+            border: Border.all(
+              color: const Color(0xFFE2E8F2),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: kNavy.withOpacity(0.045),
+                blurRadius: 15,
+                offset: const Offset(0, 5),
+              ),
+            ],
           ),
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icono, color: color, size: 26),
-              ),
-              const Spacer(),
-              Text(
-                titulo,
-                style: TextStyle(
-                  color: activo ? kTextDark : kTextMuted,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                descripcion,
-                style: const TextStyle(color: kTextMuted, fontSize: 11),
-              ),
-              const SizedBox(height: 8),
               Row(
                 children: [
                   Container(
-                    width: 6,
-                    height: 6,
+                    width: 51,
+                    height: 51,
                     decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: activo
-                          ? const Color(0xFF2ECC71)
-                          : Colors.grey.shade300,
+                      color: modulo.color.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    activo ? 'Disponible' : 'Próximamente',
-                    style: TextStyle(
-                      color: activo ? const Color(0xFF27AE60) : kTextMuted,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
+                    child: Icon(
+                      modulo.icono,
+                      color: modulo.color,
+                      size: 28,
                     ),
                   ),
                   const Spacer(),
-                  if (activo)
-                    Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      size: 12,
-                      color: color.withOpacity(0.6),
-                    ),
+                  Icon(
+                    Icons.arrow_outward_rounded,
+                    color: modulo.color.withOpacity(0.8),
+                    size: 20,
+                  ),
                 ],
+              ),
+              const Spacer(),
+              Text(
+                modulo.titulo,
+                style: const TextStyle(
+                  color: kTextDark,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                modulo.descripcion,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: kTextMuted,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                height: 3,
+                width: 43,
+                decoration: BoxDecoration(
+                  color: modulo.color,
+                  borderRadius: BorderRadius.circular(5),
+                ),
               ),
             ],
           ),
@@ -762,3 +1047,4 @@ class _ModuloCard extends StatelessWidget {
     );
   }
 }
+
