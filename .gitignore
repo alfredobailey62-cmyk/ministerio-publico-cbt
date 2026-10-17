@@ -53,3 +53,8 @@ recorridos_con_numeros.txt
 *.bak2
 *.bak3
 usuarios_backup.json
+
+# Archivos de respaldo adicionales
+*.bak_*
+*.respaldo
+*.bak_mapa
