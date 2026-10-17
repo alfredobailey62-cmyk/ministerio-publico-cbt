@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:ministerio_publico_cbt/usuario_provider.dart';
+import 'package:control_flota_vehicular/usuario_provider.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:provider/provider.dart';
-import 'usuario_provider.dart';
 
 class VehiculosPage extends StatefulWidget {
   const VehiculosPage({super.key});

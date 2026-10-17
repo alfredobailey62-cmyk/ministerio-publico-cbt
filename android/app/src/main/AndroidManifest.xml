@@ -10,7 +10,7 @@
 <!-- Para evitar problemas en Android 11+ -->
 <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <application
-        android:label="ministerio_publico_cbt"
+        android:label="Flota Vehicular"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

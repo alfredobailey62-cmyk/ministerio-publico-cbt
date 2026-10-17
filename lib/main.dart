@@ -172,7 +172,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 20),
                     const Text(
-                      'MINISTERIO PÚBLICO',
+                      'CONTROL DE FLOTA VEHICULAR',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -345,8 +345,8 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 32),
                     const Text(
-                      'Procuraduría General de la Nación',
-                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                      'Tecnología al servicio de una flota eficiente y responsable.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11, fontStyle: FontStyle.italic),
                     ),
                     const SizedBox(height: 4),
                     const Text(
@@ -489,7 +489,7 @@ class PantallaPrincipal extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Ministerio Público',
+                          'CONTROL DE FLOTA VEHICULAR',
                           style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
@@ -640,12 +640,12 @@ class PantallaPrincipal extends StatelessWidget {
             child: const Column(
               children: [
                 Text(
-                  'Procuraduría General de la Nación',
+                  'Tecnología al servicio de una flota eficiente y responsable.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white38, fontSize: 10),
                 ),
                 Text(
-                  'Sistema Interno v2.0 · Uso oficial',
+                  'Sistema de gestión de flota vehicular',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white24, fontSize: 9),
                 ),

@@ -1,4 +1,4 @@
-package com.example.ministerio_publico_cbt
+package com.controlflota.vehicular
 
 import io.flutter.embedding.android.FlutterActivity
 
