@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -330,7 +330,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
 
     try {
       final pdf = pw.Document();
-      final generado = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+      final generado = DateFormat('dd/MM/yyyy HH:mm', 'es').format(DateTime.now());
       final periodo = DateFormat('MMMM yyyy', 'es')
           .format(_mesSeleccionado);
 

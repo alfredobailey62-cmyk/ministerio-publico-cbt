@@ -1,10 +1,11 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class RecorridosPage extends StatefulWidget {
@@ -25,7 +26,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
   String? _marcaModelo;
 
   List<Map<String, dynamic>> _puntosGPS = [];
-  StreamSubscription<Position>? _posicionStream;
+  static StreamSubscription<Position>? _posicionStream;
   bool _recorridoActivo = false;
   String? _recorridoIdActivo;
 
@@ -69,292 +70,216 @@ class _RecorridosPageState extends State<RecorridosPage> {
     }
   }
 
+  static Timer? _timerParada;
+  DateTime? _ultimoPuntoHora;
+  int _bloqueSiguiente = 0;
+  int _contadorPuntos = 0;
+  bool _subiendo = false;
+  static const int TAM_BLOQUE = 300;
+
   Future<void> _guardarRecorridoEnBackground() async {
-    if (_recorridoIdActivo != null) {
-      await _prefs?.setString(
-        'recorrido_activo_id',
-        _recorridoIdActivo!,
-      );
-      await _prefs?.setString(
-        'puntos_activos',
-        json.encode(_puntosGPS),
-      );
-    }
+    if (_recorridoIdActivo == null) return;
+    await _prefs?.setString('recorrido_activo_id', _recorridoIdActivo!);
+    await _prefs?.setString('puntos_activos', json.encode(_puntosGPS));
+    await _prefs?.setInt('bloque_siguiente', _bloqueSiguiente);
   }
 
-  Future<void> _reanudarGPS() async {
-    final servicioActivo = await Geolocator.isLocationServiceEnabled();
-    if (!servicioActivo) return;
-
-    LocationPermission permiso = await Geolocator.checkPermission();
-
-    if (permiso != LocationPermission.always &&
-        permiso != LocationPermission.whileInUse) {
-      permiso = await Geolocator.requestPermission();
-
-      if (permiso != LocationPermission.always &&
-          permiso != LocationPermission.whileInUse) {
-        return;
-      }
-    }
-
-    _posicionStream?.cancel();
-
-    _posicionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
+  LocationSettings _ajustesGPS() {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
         accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 5,
-      ),
-    ).listen((Position position) async {
-      final punto = {
-        'lat': position.latitude,
-        'lng': position.longitude,
-        'hora': DateTime.now().toIso8601String(),
-      };
-
-      _puntosGPS.add(punto);
-      await _guardarRecorridoEnBackground();
-      _detectarParada(position);
-
-      try {
-        if (_recorridoIdActivo != null) {
-          await FirebaseFirestore.instance
-              .collection('recorridos')
-              .doc(_recorridoIdActivo)
-              .collection('puntos_gps')
-              .doc('${DateTime.now().microsecondsSinceEpoch}')
-              .set(punto);
-        }
-      } catch (e) {
-        await _guardarPuntoOffline(punto);
-      }
-    });
-  }
-
-  Future<void> _guardarPuntoOffline(
-    Map<String, dynamic> punto,
-  ) async {
-    // Cada punto queda ligado al recorrido que lo generó.
-    // Así no se mezcla con otro recorrido al recuperar conexión.
-    final pendientes =
-        _prefs?.getStringList('puntos_pendientes') ?? [];
-    final puntoSeguro = <String, dynamic>{
-      ...punto,
-      'recorrido_id': _recorridoIdActivo,
-      'punto_id': punto['punto_id'] ??
-          '${DateTime.now().microsecondsSinceEpoch}',
-    };
-
-    pendientes.add(json.encode(puntoSeguro));
-    await _prefs?.setStringList('puntos_pendientes', pendientes);
-  }
-
-  Future<void> _sincronizarPuntosOffline() async {
-    final pendientes =
-        _prefs?.getStringList('puntos_pendientes') ?? [];
-    if (pendientes.isEmpty) return;
-
-    final noSincronizados = <String>[];
-    for (final puntoJson in pendientes) {
-      try {
-        final punto =
-            Map<String, dynamic>.from(json.decode(puntoJson) as Map);
-        final recorridoId = punto['recorrido_id']?.toString();
-        final puntoId = punto['punto_id']?.toString();
-        if (recorridoId == null || recorridoId.isEmpty ||
-            puntoId == null || puntoId.isEmpty) {
-          // Los puntos antiguos no tenían recorrido_id. Se conservan
-          // pendientes en lugar de asignarlos al recorrido equivocado.
-          noSincronizados.add(puntoJson);
-          continue;
-        }
-
-        punto.remove('recorrido_id');
-        punto.remove('punto_id');
-        await FirebaseFirestore.instance
-            .collection('recorridos')
-            .doc(recorridoId)
-            .collection('puntos_gps')
-            .doc(puntoId)
-            .set(punto, SetOptions(merge: true));
-      } catch (_) {
-        noSincronizados.add(puntoJson);
-      }
-    }
-
-    await _prefs?.setStringList('puntos_pendientes', noSincronizados);
-  }
-
-  void _detectarParada(Position posicionActual) {
-    if (_ultimaPosicion != null) {
-      final distancia = Geolocator.distanceBetween(
-        _ultimaPosicion!.latitude,
-        _ultimaPosicion!.longitude,
-        posicionActual.latitude,
-        posicionActual.longitude,
+        distanceFilter: 30,
+        intervalDuration: const Duration(seconds: 5),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'Recorrido en curso',
+          notificationText: 'Registrando la ruta GPS del vehículo',
+          enableWakeLock: true,
+        ),
       );
-
-      if (distancia < DISTANCIA_PARADA) {
-        if (!_enParada) {
-          _enParada = true;
-          _inicioParada = DateTime.now();
-          _puntosParada.clear();
-        }
-
-        _puntosParada.add({
-          'lat': posicionActual.latitude,
-          'lng': posicionActual.longitude,
-          'hora': DateTime.now().toIso8601String(),
-        });
-
-        if (DateTime.now()
-                .difference(_inicioParada!)
-                .inMinutes >=
-            TIEMPO_PARADA_MINUTOS) {
-          _registrarParada();
-        }
-      } else {
-        if (_enParada) {
-          _registrarParada();
-          _enParada = false;
-          _inicioParada = null;
-          _puntosParada.clear();
-        }
-      }
     }
-
-    _ultimaPosicion = posicionActual;
+    return const LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 30,
+    );
   }
 
-  Future<void> _registrarParada() async {
-    if (_recorridoIdActivo == null || _puntosParada.isEmpty) {
-      return;
-    }
-
-    if (_inicioParada == null) return;
-
-    final avgLat = _puntosParada
-            .map((p) => p['lat'] as double)
-            .reduce((a, b) => a + b) /
-        _puntosParada.length;
-
-    final avgLng = _puntosParada
-            .map((p) => p['lng'] as double)
-            .reduce((a, b) => a + b) /
-        _puntosParada.length;
-
-    final duracion =
-        DateTime.now().difference(_inicioParada!).inMinutes;
-
-    await FirebaseFirestore.instance
-        .collection('recorridos')
-        .doc(_recorridoIdActivo)
-        .collection('paradas')
-        .add({
-      'ubicacion': GeoPoint(avgLat, avgLng),
-      'inicio': _inicioParada,
-      'fin': DateTime.now(),
-      'duracion_minutos': duracion,
-      'puntos': _puntosParada,
-    });
-  }  Future<bool> _iniciarGPS() async {
-    final servicioActivo =
-        await Geolocator.isLocationServiceEnabled();
-
-    if (!servicioActivo) {
+  Future<bool> _servicioYPermisos() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
       _mostrarSnackbar('Active el GPS del dispositivo');
       return false;
     }
-
-    LocationPermission permiso =
-        await Geolocator.checkPermission();
-
+    var permiso = await Geolocator.checkPermission();
     if (permiso == LocationPermission.denied) {
       permiso = await Geolocator.requestPermission();
-
-      if (permiso == LocationPermission.denied) {
-        _mostrarSnackbar('Se necesita permiso de ubicación');
-        return false;
-      }
     }
-
-    if (permiso == LocationPermission.deniedForever) {
-      _mostrarSnackbar(
-        'El permiso de ubicación está denegado permanentemente',
-      );
+    if (permiso == LocationPermission.denied) {
+      _mostrarSnackbar('Se necesita permiso de ubicación');
       return false;
     }
+    if (permiso == LocationPermission.deniedForever) {
+      _mostrarSnackbar('El permiso de ubicación está denegado. Actívelo en Ajustes.');
+      return false;
+    }
+    return true;
+  }
 
-    _puntosGPS.clear();
-    _ultimaPosicion = null;
-    _inicioParada = null;
-    _enParada = false;
-    _puntosParada.clear();
-
+  void _arrancarStream() {
     _posicionStream?.cancel();
-
     _posicionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 5,
-      ),
-    ).listen((Position position) async {
-      final punto = {
-        'lat': position.latitude,
-        'lng': position.longitude,
-        'hora': DateTime.now().toIso8601String(),
-      };
+      locationSettings: _ajustesGPS(),
+    ).listen(_alRecibirPosicion, onError: (_) {});
 
-      _puntosGPS.add(punto);
+    _timerParada?.cancel();
+    _timerParada = Timer.periodic(const Duration(minutes: 1), (_) {
+      _revisarParada();
+      _subirBloques();
+    });
+  }
 
-      await _guardarRecorridoEnBackground();
-      _detectarParada(position);
+  Future<void> _reanudarGPS() async {
+    _bloqueSiguiente = _prefs?.getInt('bloque_siguiente') ?? 0;
+    if (!await _servicioYPermisos()) return;
+    _arrancarStream();
+  }
 
-      try {
-        if (_recorridoIdActivo != null) {
-          await FirebaseFirestore.instance
-              .collection('recorridos')
-              .doc(_recorridoIdActivo)
-              .collection('puntos_gps')
-              .doc('${DateTime.now().microsecondsSinceEpoch}')
-              .set(punto);
-        }
-      } catch (e) {
-        await _guardarPuntoOffline(punto);
-      }
+  void _alRecibirPosicion(Position position) {
+    if (position.accuracy > 100 && _ultimaPosicion != null) return;
+
+    final ahora = DateTime.now();
+    if (_enParada) _registrarParada(ahora);
+
+    _ultimaPosicion = position;
+    _ultimoPuntoHora = ahora;
+
+    _puntosGPS.add(<String, dynamic>{
+      'lat': double.parse(position.latitude.toStringAsFixed(6)),
+      'lng': double.parse(position.longitude.toStringAsFixed(6)),
+      'hora': ahora.toIso8601String(),
     });
 
-    if (mounted) {
-      setState(() => _recorridoActivo = true);
-    }
+    _contadorPuntos++;
+    if (_contadorPuntos % 10 == 0) _guardarRecorridoEnBackground();
+    if (_puntosGPS.length >= TAM_BLOQUE) _subirBloques();
+  }
 
+  Future<void> _subirBloques({bool todo = false}) async {
+    if (_subiendo || _recorridoIdActivo == null) return;
+    _subiendo = true;
+    try {
+      while (_puntosGPS.length >= TAM_BLOQUE || (todo && _puntosGPS.isNotEmpty)) {
+        final n = _puntosGPS.length < TAM_BLOQUE ? _puntosGPS.length : TAM_BLOQUE;
+        final bloque = _puntosGPS.sublist(0, n).map((p) => Map<String, dynamic>.from(p)).toList();
+
+        await FirebaseFirestore.instance
+            .collection('recorridos')
+            .doc(_recorridoIdActivo)
+            .collection('ruta_bloques')
+            .doc(_bloqueSiguiente.toString().padLeft(5, '0'))
+            .set({'orden': _bloqueSiguiente, 'total': n, 'puntos': bloque})
+            .timeout(const Duration(seconds: 10));
+
+        _puntosGPS.removeRange(0, n);
+        _bloqueSiguiente++;
+        await _guardarRecorridoEnBackground();
+      }
+    } catch (_) {
+    } finally {
+      _subiendo = false;
+    }
+  }
+
+  void _revisarParada() {
+    if (_enParada || _ultimaPosicion == null || _ultimoPuntoHora == null) return;
+    final quieto = DateTime.now().difference(_ultimoPuntoHora!);
+    if (quieto.inMinutes >= TIEMPO_PARADA_MINUTOS) {
+      _enParada = true;
+      _inicioParada = _ultimoPuntoHora;
+    }
+  }
+
+  Future<void> _registrarParada(DateTime fin) async {
+    final inicio = _inicioParada;
+    final pos = _ultimaPosicion;
+    final id = _recorridoIdActivo;
+    _enParada = false;
+    _inicioParada = null;
+    if (inicio == null || pos == null || id == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('recorridos')
+          .doc(id)
+          .collection('paradas')
+          .add({
+        'ubicacion': GeoPoint(pos.latitude, pos.longitude),
+        'inicio': inicio,
+        'fin': fin,
+        'duracion_minutos': fin.difference(inicio).inMinutes,
+      }).timeout(const Duration(seconds: 10));
+    } catch (_) {}
+  }
+
+  Future<bool> _iniciarGPS() async {
+    if (!await _servicioYPermisos()) return false;
+
+    _puntosGPS = [];
+    _bloqueSiguiente = 0;
+    _contadorPuntos = 0;
+    _ultimaPosicion = null;
+    _ultimoPuntoHora = null;
+    _inicioParada = null;
+    _enParada = false;
+
+    _arrancarStream();
+
+    try {
+      final p = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+      _alRecibirPosicion(p);
+    } catch (_) {}
+
+    await _guardarRecorridoEnBackground();
+    if (mounted) setState(() => _recorridoActivo = true);
     _mostrarSnackbar('GPS activado. Grabando recorrido');
     return true;
   }
 
   Future<void> _detenerGPS() async {
-    if (_enParada && _inicioParada != null) {
-      final duracionParada =
-          DateTime.now().difference(_inicioParada!);
+    _timerParada?.cancel();
+    _timerParada = null;
 
-      if (duracionParada.inMinutes >= TIEMPO_PARADA_MINUTOS) {
-        await _registrarParada();
-      }
-    }
+    try {
+      final p = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+      _alRecibirPosicion(p);
+    } catch (_) {}
+
+    if (_enParada) await _registrarParada(DateTime.now());
 
     await _posicionStream?.cancel();
     _posicionStream = null;
 
-    await _sincronizarPuntosOffline();
+    var espera = 0;
+    while (_subiendo && espera < 50) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      espera++;
+    }
+    await _subirBloques(todo: true);
 
+    _puntosGPS = [];
     await _prefs?.remove('recorrido_activo_id');
     await _prefs?.remove('puntos_activos');
+    await _prefs?.remove('bloque_siguiente');
 
-    if (mounted) {
-      setState(() => _recorridoActivo = false);
-    }
+    if (mounted) setState(() => _recorridoActivo = false);
   }
-
   String _formatearFechaHora(DateTime fecha) {
     final dia = fecha.day.toString().padLeft(2, '0');
     final mes = fecha.month.toString().padLeft(2, '0');
@@ -1552,7 +1477,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
     _kmFinController.dispose();
     _conductorController.dispose();
     _destinoController.dispose();
-    _posicionStream?.cancel();
+    _guardarRecorridoEnBackground();
     super.dispose();
   }
 }// ========== PAGINA DEL MAPA ==========
@@ -1590,53 +1515,46 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
 
   Future<void> _cargarDatos() async {
     try {
-      final puntosSnapshot = await FirebaseFirestore.instance
-          .collection('recorridos')
-          .doc(widget.recorridoId)
-          .collection('puntos_gps')
-          .orderBy('hora')
-          .get();
-
+      final ref = FirebaseFirestore.instance.collection('recorridos').doc(widget.recorridoId);
       final puntosTemp = <LatLng>[];
 
-      for (final doc in puntosSnapshot.docs) {
-        final lat = doc['lat'];
-        final lng = doc['lng'];
-
-        puntosTemp.add(
-          LatLng(
-            (lat as num).toDouble(),
-            (lng as num).toDouble(),
-          ),
-        );
+      final bloques = await ref.collection('ruta_bloques').orderBy('orden').get();
+      for (final b in bloques.docs) {
+        final lista = b.data()['puntos'];
+        if (lista is List) {
+          for (final p in lista) {
+            if (p is Map) {
+              puntosTemp.add(LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()));
+            }
+          }
+        }
       }
 
-      final paradasSnapshot = await FirebaseFirestore.instance
-          .collection('recorridos')
-          .doc(widget.recorridoId)
-          .collection('paradas')
-          .get();
+      if (puntosTemp.isEmpty) {
+        final viejo = await ref.collection('puntos_gps').orderBy('hora').get();
+        for (final d in viejo.docs) {
+          final m = d.data();
+          puntosTemp.add(LatLng((m['lat'] as num).toDouble(), (m['lng'] as num).toDouble()));
+        }
+      }
+
+      final paradasSnapshot = await ref.collection('paradas').get();
 
       if (!mounted) return;
-
       setState(() {
         _puntos = puntosTemp;
-        _paradas = paradasSnapshot.docs
-            .map((d) => d.data())
-            .toList();
+        _paradas = paradasSnapshot.docs.map((d) => d.data()).toList();
         _errorCarga = null;
         _cargando = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorCarga = 'No se pudieron cargar los datos del mapa. '
-            'Compruebe la conexión y los permisos de Firebase.\n$e';
+        _errorCarga = 'No se pudieron cargar los datos del mapa.\n$e';
         _cargando = false;
       });
     }
   }
-
   @override
   Widget build(BuildContext context) {
     const azul = Color(0xFF17365D);
@@ -1717,10 +1635,7 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
             )
           : FlutterMap(
               mapController: _mapController,
-              options: MapOptions(
-                initialCenter: centro,
-                initialZoom: 14,
-              ),
+              options: MapOptions(initialCenter: centro, initialZoom: 14, initialCameraFit: _puntos.length > 1 ? CameraFit.bounds(bounds: LatLngBounds.fromPoints(_puntos), padding: const EdgeInsets.all(40)) : null),
               children: [
                 TileLayer(
                   urlTemplate:
