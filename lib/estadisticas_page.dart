@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -11,14 +11,14 @@ import 'package:pdf/widgets.dart' as pw;
 const Color _azul = Color(0xFF003580);
 const Color _fondo = Color(0xFFF0F4FF);
 
-class _Recorrido {
+class _Trip {
   final String conductor;
   final String placa;
   final double km;
   final double? horas;
   final DateTime fecha;
 
-  const _Recorrido({
+  const _Trip({
     required this.conductor,
     required this.placa,
     required this.km,
@@ -27,8 +27,8 @@ class _Recorrido {
   });
 }
 
-class _Resumen {
-  final List<_Recorrido> recorridos;
+class _Summary {
+  final List<_Trip> recorridos;
   final Map<String, int> viajesConductor;
   final Map<String, int> viajesVehiculo;
   final Map<String, double> kmConductor;
@@ -38,7 +38,7 @@ class _Resumen {
   final int recorridosSinKm;
   final int recorridosSinTiempo;
 
-  const _Resumen({
+  const _Summary({
     required this.recorridos,
     required this.viajesConductor,
     required this.viajesVehiculo,
@@ -50,36 +50,28 @@ class _Resumen {
     required this.recorridosSinTiempo,
   });
 
-  double get kmTotal =>
-      kmVehiculo.values.fold(0.0, (a, b) => a + b);
+  double get kmTotal => kmVehiculo.values.fold(0.0, (a, b) => a + b);
 
-  double get horasTotal =>
-      horasConductor.values.fold(0.0, (a, b) => a + b);
+  double get horasTotal => horasConductor.values.fold(0.0, (a, b) => a + b);
 
   double get litrosTotal =>
       combustibleVehiculo.values.fold(0.0, (a, b) => a + b);
 
   int get totalRecorridos => recorridos.length;
 
-  String? get conductorMasActivo =>
-      _mayor(viajesConductor);
+  String? get topDriver => _highestValue(viajesConductor);
 
-  String? get conductorMasKm =>
-      _mayor(kmConductor);
+  String? get driverWithMostDistance => _highestValue(kmConductor);
 
-  String? get conductorMasHoras =>
-      _mayor(horasConductor);
+  String? get driverWithMostHours => _highestValue(horasConductor);
 
-  String? get vehiculoMasActivo =>
-      _mayor(viajesVehiculo);
+  String? get mostActiveVehicle => _highestValue(viajesVehiculo);
 
-  String? get vehiculoMasKm =>
-      _mayor(kmVehiculo);
+  String? get vehicleWithMostDistance => _highestValue(kmVehiculo);
 
-  String? get vehiculoMasCombustible =>
-      _mayor(combustibleVehiculo);
+  String? get vehicleWithMostFuel => _highestValue(combustibleVehiculo);
 
-  static String? _mayor<T extends num>(Map<String, T> datos) {
+  static String? _highestValue<T extends num>(Map<String, T> datos) {
     if (datos.isEmpty) return null;
 
     final ordenados = datos.entries.toList()
@@ -89,29 +81,25 @@ class _Resumen {
   }
 }
 
-class EstadisticasPage extends StatefulWidget {
-  const EstadisticasPage({super.key});
+class StatisticsPage extends StatefulWidget {
+  const StatisticsPage({super.key});
 
   @override
-  State<EstadisticasPage> createState() => _EstadisticasPageState();
+  State<StatisticsPage> createState() => _StatisticsPageState();
 }
 
-class _EstadisticasPageState extends State<EstadisticasPage> {
-  DateTime _mesSeleccionado =
-      DateTime(DateTime.now().year, DateTime.now().month);
+class _StatisticsPageState extends State<StatisticsPage> {
+  DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
 
-  bool _generandoPdf = false;
+  bool _generatingPdf = false;
 
-  DateTime _inicioMes(DateTime fecha) =>
-      DateTime(fecha.year, fecha.month);
+  DateTime _startOfMonth(DateTime fecha) => DateTime(fecha.year, fecha.month);
 
-  DateTime _finMes(DateTime fecha) =>
-      DateTime(fecha.year, fecha.month + 1);
+  DateTime _endOfMonth(DateTime fecha) => DateTime(fecha.year, fecha.month + 1);
 
-  String get _nombreMes =>
-      DateFormat('MMMM yyyy', 'es').format(_mesSeleccionado);
+  String get _monthName => DateFormat('MMMM yyyy', 'es').format(_selectedMonth);
 
-  DateTime? _fecha(dynamic valor) {
+  DateTime? _parseDate(dynamic valor) {
     if (valor is Timestamp) return valor.toDate();
     if (valor is DateTime) return valor;
 
@@ -122,7 +110,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     return null;
   }
 
-  double _numero(dynamic valor) {
+  double _parseNumber(dynamic valor) {
     if (valor is num) return valor.toDouble();
     if (valor is String) {
       return double.tryParse(valor.replaceAll(',', '.')) ?? 0;
@@ -130,7 +118,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     return 0;
   }
 
-  String _texto(Map<String, dynamic> datos, List<String> claves) {
+  String _textValue(Map<String, dynamic> datos, List<String> claves) {
     for (final clave in claves) {
       final valor = datos[clave];
       if (valor != null && valor.toString().trim().isNotEmpty) {
@@ -140,19 +128,16 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     return '';
   }
 
-  DateTime? _buscarFecha(
-    Map<String, dynamic> datos,
-    List<String> claves,
-  ) {
+  DateTime? _findDate(Map<String, dynamic> datos, List<String> claves) {
     for (final clave in claves) {
-      final fecha = _fecha(datos[clave]);
+      final fecha = _parseDate(datos[clave]);
       if (fecha != null) return fecha;
     }
     return null;
   }
 
-  double? _duracionHoras(Map<String, dynamic> datos) {
-    final inicio = _buscarFecha(datos, [
+  double? _durationHours(Map<String, dynamic> datos) {
+    final inicio = _findDate(datos, [
       'hora_salida',
       'fecha_inicio',
       'hora_inicio',
@@ -161,7 +146,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
       'salida',
     ]);
 
-    final fin = _buscarFecha(datos, [
+    final fin = _findDate(datos, [
       'hora_llegada',
       'fecha_fin',
       'hora_fin',
@@ -187,14 +172,14 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     return null;
   }
 
-  Future<_Resumen> _calcularResumen(
+  Future<_Summary> _calculateSummary(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> recorridosDocs,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> combustibleDocs,
   ) async {
-    final inicio = _inicioMes(_mesSeleccionado);
-    final fin = _finMes(_mesSeleccionado);
+    final inicio = _startOfMonth(_selectedMonth);
+    final fin = _endOfMonth(_selectedMonth);
 
-    final viajes = <_Recorrido>[];
+    final viajes = <_Trip>[];
     final viajesConductor = <String, int>{};
     final viajesVehiculo = <String, int>{};
     final kmConductor = <String, double>{};
@@ -208,7 +193,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     for (final doc in recorridosDocs) {
       final datos = doc.data();
 
-      final fecha = _buscarFecha(datos, [
+      final fecha = _findDate(datos, [
         'fecha',
         'fecha_inicio',
         'hora_salida',
@@ -217,34 +202,28 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
         'creado_en',
       ]);
 
-      if (fecha == null ||
-          fecha.isBefore(inicio) ||
-          !fecha.isBefore(fin)) {
+      if (fecha == null || fecha.isBefore(inicio) || !fecha.isBefore(fin)) {
         continue;
       }
 
-      final conductor = _texto(datos, [
+      final conductor = _textValue(datos, [
         'conductor',
         'nombre_conductor',
         'conductor_nombre',
         'usuario_nombre',
       ]);
 
-      final placa = _texto(datos, [
-        'placa',
-        'vehiculo_placa',
-        'matricula',
-      ]);
+      final placa = _textValue(datos, ['placa', 'vehiculo_placa', 'matricula']);
 
-      final km = _numero(
+      final km = _parseNumber(
         datos['km_recorrido'] ??
             datos['kilometraje_recorrido'] ??
             datos['kilometros_recorridos'],
       );
 
-      final horas = _duracionHoras(datos);
+      final horas = _durationHours(datos);
 
-      final recorrido = _Recorrido(
+      final recorrido = _Trip(
         conductor: conductor.isEmpty ? 'Sin conductor identificado' : conductor,
         placa: placa.isEmpty ? 'Vehículo sin placa identificada' : placa,
         km: km,
@@ -264,8 +243,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
         kmConductor[recorrido.conductor] =
             (kmConductor[recorrido.conductor] ?? 0) + km;
 
-        kmVehiculo[recorrido.placa] =
-            (kmVehiculo[recorrido.placa] ?? 0) + km;
+        kmVehiculo[recorrido.placa] = (kmVehiculo[recorrido.placa] ?? 0) + km;
       } else {
         sinKm++;
       }
@@ -281,36 +259,26 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     for (final doc in combustibleDocs) {
       final datos = doc.data();
 
-      final fecha = _buscarFecha(datos, [
-        'fecha',
-        'creado_en',
-        'createdAt',
-      ]);
+      final fecha = _findDate(datos, ['fecha', 'creado_en', 'createdAt']);
 
-      if (fecha == null ||
-          fecha.isBefore(inicio) ||
-          !fecha.isBefore(fin)) {
+      if (fecha == null || fecha.isBefore(inicio) || !fecha.isBefore(fin)) {
         continue;
       }
 
-      final placa = _texto(datos, [
-        'placa',
-        'vehiculo_placa',
-      ]);
+      final placa = _textValue(datos, ['placa', 'vehiculo_placa']);
 
-      final litros = _numero(
+      final litros = _parseNumber(
         datos['litros_equivalentes'] ??
             datos['litros'] ??
             datos['cantidad_litros'],
       );
 
       if (placa.isNotEmpty && litros > 0) {
-        combustibleVehiculo[placa] =
-            (combustibleVehiculo[placa] ?? 0) + litros;
+        combustibleVehiculo[placa] = (combustibleVehiculo[placa] ?? 0) + litros;
       }
     }
 
-    return _Resumen(
+    return _Summary(
       recorridos: viajes,
       viajesConductor: viajesConductor,
       viajesVehiculo: viajesVehiculo,
@@ -323,16 +291,18 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     );
   }
 
-  Future<void> _exportarPdf(_Resumen resumen) async {
-    if (_generandoPdf) return;
+  Future<void> _exportarPdf(_Summary resumen) async {
+    if (_generatingPdf) return;
 
-    setState(() => _generandoPdf = true);
+    setState(() => _generatingPdf = true);
 
     try {
       final pdf = pw.Document();
-      final generado = DateFormat('dd/MM/yyyy HH:mm', 'es').format(DateTime.now());
-      final periodo = DateFormat('MMMM yyyy', 'es')
-          .format(_mesSeleccionado);
+      final generado = DateFormat(
+        'dd/MM/yyyy HH:mm',
+        'es',
+      ).format(DateTime.now());
+      final periodo = DateFormat('MMMM yyyy', 'es').format(_selectedMonth);
 
       final azulPdf = PdfColor.fromHex('#003580');
       final azulClaro = PdfColor.fromHex('#E8F0FF');
@@ -364,10 +334,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
         String unidad,
       ) {
         return pw.Table(
-          border: pw.TableBorder.all(
-            color: PdfColors.grey300,
-            width: 0.5,
-          ),
+          border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
           children: [
             pw.TableRow(
               decoration: pw.BoxDecoration(color: azulClaro),
@@ -388,20 +355,20 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                 ),
               ],
             ),
-            ...datos.map((e) => pw.TableRow(
-              children: [
-                pw.Padding(
-                  padding: const pw.EdgeInsets.all(6),
-                  child: pw.Text(e.key),
-                ),
-                pw.Padding(
-                  padding: const pw.EdgeInsets.all(6),
-                  child: pw.Text(
-                    '${e.value.toStringAsFixed(2)} $unidad',
+            ...datos.map(
+              (e) => pw.TableRow(
+                children: [
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.all(6),
+                    child: pw.Text(e.key),
                   ),
-                ),
-              ],
-            )),
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.all(6),
+                    child: pw.Text('${e.value.toStringAsFixed(2)} $unidad'),
+                  ),
+                ],
+              ),
+            ),
           ],
         );
       }
@@ -445,27 +412,45 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
           build: (_) => [
             titulo('1. RESUMEN GENERAL'),
             pw.Table(
-              border: pw.TableBorder.all(
-                color: PdfColors.grey300,
-              ),
-              children: [
-                ['Indicador', 'Resultado'],
-                ['Total de recorridos', '${resumen.totalRecorridos}'],
-                ['Kilómetros registrados',
-                  '${resumen.kmTotal.toStringAsFixed(2)} km'],
-                ['Horas de conducción registradas',
-                  '${resumen.horasTotal.toStringAsFixed(2)} h'],
-                ['Combustible registrado',
-                  '${resumen.litrosTotal.toStringAsFixed(2)} L'],
-                ['Recorridos sin kilometraje', '${resumen.recorridosSinKm}'],
-                ['Recorridos sin duración calculable',
-                  '${resumen.recorridosSinTiempo}'],
-              ].map((fila) => pw.TableRow(
-                children: fila.map((celda) => pw.Padding(
-                  padding: const pw.EdgeInsets.all(6),
-                  child: pw.Text(celda),
-                )).toList(),
-              )).toList(),
+              border: pw.TableBorder.all(color: PdfColors.grey300),
+              children:
+                  [
+                        ['Indicador', 'Resultado'],
+                        ['Total de recorridos', '${resumen.totalRecorridos}'],
+                        [
+                          'Kilómetros registrados',
+                          '${resumen.kmTotal.toStringAsFixed(2)} km',
+                        ],
+                        [
+                          'Horas de conducción registradas',
+                          '${resumen.horasTotal.toStringAsFixed(2)} h',
+                        ],
+                        [
+                          'Combustible registrado',
+                          '${resumen.litrosTotal.toStringAsFixed(2)} L',
+                        ],
+                        [
+                          'Recorridos sin kilometraje',
+                          '${resumen.recorridosSinKm}',
+                        ],
+                        [
+                          'Recorridos sin duración calculable',
+                          '${resumen.recorridosSinTiempo}',
+                        ],
+                      ]
+                      .map(
+                        (fila) => pw.TableRow(
+                          children: fila
+                              .map(
+                                (celda) => pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Text(celda),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      )
+                      .toList(),
             ),
             titulo('2. ACTIVIDAD POR CONDUCTOR'),
             tabla(
@@ -475,19 +460,9 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
               'viajes',
             ),
             titulo('3. KILÓMETROS POR CONDUCTOR'),
-            tabla(
-              'Conductor',
-              'Distancia',
-              ordenar(resumen.kmConductor),
-              'km',
-            ),
+            tabla('Conductor', 'Distancia', ordenar(resumen.kmConductor), 'km'),
             titulo('4. HORAS REGISTRADAS POR CONDUCTOR'),
-            tabla(
-              'Conductor',
-              'Tiempo',
-              ordenar(resumen.horasConductor),
-              'h',
-            ),
+            tabla('Conductor', 'Tiempo', ordenar(resumen.horasConductor), 'h'),
             titulo('5. ACTIVIDAD POR VEHÍCULO'),
             tabla(
               'Placa',
@@ -496,12 +471,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
               'viajes',
             ),
             titulo('6. KILÓMETROS POR VEHÍCULO'),
-            tabla(
-              'Placa',
-              'Distancia',
-              ordenar(resumen.kmVehiculo),
-              'km',
-            ),
+            tabla('Placa', 'Distancia', ordenar(resumen.kmVehiculo), 'km'),
             titulo('7. COMBUSTIBLE POR VEHÍCULO'),
             tabla(
               'Placa',
@@ -515,29 +485,34 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                   ? 'No existen recorridos registrados para el mes seleccionado.'
                   : 'Se registraron ${resumen.totalRecorridos} recorridos durante el periodo.',
             ),
-            if (resumen.vehiculoMasKm != null)
+            if (resumen.vehicleWithMostDistance != null)
               pw.Bullet(
-                text: 'Vehículo con mayor kilometraje registrado: '
-                    '${resumen.vehiculoMasKm}.',
+                text:
+                    'Vehículo con mayor kilometraje registrado: '
+                    '${resumen.vehicleWithMostDistance}.',
               ),
-            if (resumen.conductorMasKm != null)
+            if (resumen.driverWithMostDistance != null)
               pw.Bullet(
-                text: 'Conductor con mayor distancia registrada: '
-                    '${resumen.conductorMasKm}.',
+                text:
+                    'Conductor con mayor distancia registrada: '
+                    '${resumen.driverWithMostDistance}.',
               ),
-            if (resumen.conductorMasHoras != null)
+            if (resumen.driverWithMostHours != null)
               pw.Bullet(
-                text: 'Conductor con más horas registradas: '
-                    '${resumen.conductorMasHoras}.',
+                text:
+                    'Conductor con más horas registradas: '
+                    '${resumen.driverWithMostHours}.',
               ),
             if (resumen.recorridosSinKm > 0)
               pw.Bullet(
-                text: '${resumen.recorridosSinKm} recorridos no tienen '
+                text:
+                    '${resumen.recorridosSinKm} recorridos no tienen '
                     'kilometraje válido.',
               ),
             if (resumen.recorridosSinTiempo > 0)
               pw.Bullet(
-                text: '${resumen.recorridosSinTiempo} recorridos no tienen '
+                text:
+                    '${resumen.recorridosSinTiempo} recorridos no tienen '
                     'duración calculable. Revise las fechas de salida y llegada.',
               ),
             pw.SizedBox(height: 10),
@@ -554,17 +529,17 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
       final directorio = await getTemporaryDirectory();
       final archivo = File(
         '${directorio.path}/informe_flota_'
-        '${_mesSeleccionado.year}_'
-        '${_mesSeleccionado.month.toString().padLeft(2, '0')}.pdf',
+        '${_selectedMonth.year}_'
+        '${_selectedMonth.month.toString().padLeft(2, '0')}.pdf',
       );
 
       await archivo.writeAsBytes(await pdf.save());
       await OpenFile.open(archivo.path);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Informe PDF generado.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Informe PDF generado.')));
       }
     } catch (e) {
       if (mounted) {
@@ -573,7 +548,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
         );
       }
     } finally {
-      if (mounted) setState(() => _generandoPdf = false);
+      if (mounted) setState(() => _generatingPdf = false);
     }
   }
 
@@ -641,11 +616,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
         ),
         subtitle: Text('${ordenados.length} registros'),
         children: ordenados.isEmpty
-            ? [
-                const ListTile(
-                  title: Text('Sin datos para este periodo.'),
-                ),
-              ]
+            ? [const ListTile(title: Text('Sin datos para este periodo.'))]
             : ordenados.map((e) {
                 final maximo = ordenados.first.value.toDouble();
                 final valor = e.value.toDouble();
@@ -674,13 +645,11 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     );
   }
 
-  Widget _analisis(_Resumen r) {
+  Widget _analysis(_Summary r) {
     final observaciones = <String>[];
 
     if (r.totalRecorridos == 0) {
-      observaciones.add(
-        'No hay recorridos para el mes seleccionado.',
-      );
+      observaciones.add('No hay recorridos para el mes seleccionado.');
     } else {
       observaciones.add(
         'Se registraron ${r.totalRecorridos} recorridos y '
@@ -688,28 +657,22 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
       );
     }
 
-    if (r.vehiculoMasKm != null) {
+    if (r.vehicleWithMostDistance != null) {
       observaciones.add(
-        'Mayor kilometraje por vehículo: ${r.vehiculoMasKm}.',
+        'Mayor kilometraje por vehículo: ${r.vehicleWithMostDistance}.',
       );
     }
 
-    if (r.vehiculoMasActivo != null) {
-      observaciones.add(
-        'Vehículo con más recorridos: ${r.vehiculoMasActivo}.',
-      );
+    if (r.mostActiveVehicle != null) {
+      observaciones.add('Vehículo con más recorridos: ${r.mostActiveVehicle}.');
     }
 
-    if (r.conductorMasActivo != null) {
-      observaciones.add(
-        'Conductor con más recorridos: ${r.conductorMasActivo}.',
-      );
+    if (r.topDriver != null) {
+      observaciones.add('Conductor con más recorridos: ${r.topDriver}.');
     }
 
-    if (r.conductorMasHoras != null) {
-      observaciones.add(
-        'Más horas registradas: ${r.conductorMasHoras}.',
-      );
+    if (r.driverWithMostHours != null) {
+      observaciones.add('Más horas registradas: ${r.driverWithMostHours}.');
     }
 
     if (r.recorridosSinKm > 0 || r.recorridosSinTiempo > 0) {
@@ -732,10 +695,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                 Expanded(
                   child: Text(
                     'Análisis automático',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
@@ -747,11 +707,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.insights,
-                      color: _azul,
-                      size: 18,
-                    ),
+                    const Icon(Icons.insights, color: _azul, size: 18),
                     const SizedBox(width: 8),
                     Expanded(child: Text(texto)),
                   ],
@@ -764,25 +720,22 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
     );
   }
 
-  Widget _contenido(_Resumen r) {
+  Widget _content(_Summary r) {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
         Card(
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: 12,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             child: Row(
               children: [
                 IconButton(
                   tooltip: 'Mes anterior',
                   onPressed: () {
                     setState(() {
-                      _mesSeleccionado = DateTime(
-                        _mesSeleccionado.year,
-                        _mesSeleccionado.month - 1,
+                      _selectedMonth = DateTime(
+                        _selectedMonth.year,
+                        _selectedMonth.month - 1,
                       );
                     });
                   },
@@ -796,7 +749,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                         style: TextStyle(fontSize: 11),
                       ),
                       Text(
-                        _nombreMes.toUpperCase(),
+                        _monthName.toUpperCase(),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
@@ -812,14 +765,14 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                   onPressed: () {
                     final actual = DateTime.now();
                     final siguiente = DateTime(
-                      _mesSeleccionado.year,
-                      _mesSeleccionado.month + 1,
+                      _selectedMonth.year,
+                      _selectedMonth.month + 1,
                     );
 
                     if (!siguiente.isAfter(
                       DateTime(actual.year, actual.month),
                     )) {
-                      setState(() => _mesSeleccionado = siguiente);
+                      setState(() => _selectedMonth = siguiente);
                     }
                   },
                   icon: const Icon(Icons.chevron_right),
@@ -836,11 +789,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
           mainAxisSpacing: 8,
           childAspectRatio: 1.65,
           children: [
-            _tarjeta(
-              'Recorridos',
-              '${r.totalRecorridos}',
-              Icons.route,
-            ),
+            _tarjeta('Recorridos', '${r.totalRecorridos}', Icons.route),
             _tarjeta(
               'Kilómetros',
               r.kmTotal.toStringAsFixed(1),
@@ -862,7 +811,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
           ],
         ),
         const SizedBox(height: 12),
-        _analisis(r),
+        _analysis(r),
         const SizedBox(height: 12),
         _ranking(
           'Vehículos con más recorridos',
@@ -908,14 +857,13 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
               children: [
                 const Text(
                   'Calidad de los datos',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text('Recorridos sin kilometraje: ${r.recorridosSinKm}'),
-                Text('Recorridos sin duración calculable: ${r.recorridosSinTiempo}'),
+                Text(
+                  'Recorridos sin duración calculable: ${r.recorridosSinTiempo}',
+                ),
                 const SizedBox(height: 8),
                 const Text(
                   'Las horas solo se calculan cuando hay datos válidos '
@@ -929,13 +877,13 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
         ),
         const SizedBox(height: 12),
         ElevatedButton.icon(
-          onPressed: _generandoPdf ? null : () => _exportarPdf(r),
+          onPressed: _generatingPdf ? null : () => _exportarPdf(r),
           style: ElevatedButton.styleFrom(
             backgroundColor: _azul,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 15),
           ),
-          icon: _generandoPdf
+          icon: _generatingPdf
               ? const SizedBox(
                   width: 18,
                   height: 18,
@@ -946,7 +894,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                 )
               : const Icon(Icons.picture_as_pdf),
           label: Text(
-            _generandoPdf
+            _generatingPdf
                 ? 'Generando informe...'
                 : 'Exportar informe mensual en PDF',
           ),
@@ -978,7 +926,7 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
             onPressed: () {
               final ahora = DateTime.now();
               setState(() {
-                _mesSeleccionado = DateTime(ahora.year, ahora.month);
+                _selectedMonth = DateTime(ahora.year, ahora.month);
               });
             },
             icon: const Icon(Icons.today),
@@ -990,7 +938,9 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
         builder: (context, recorridosSnap) {
           if (recorridosSnap.hasError) {
             return Center(
-              child: Text('Error al cargar recorridos: ${recorridosSnap.error}'),
+              child: Text(
+                'Error al cargar recorridos: ${recorridosSnap.error}',
+              ),
             );
           }
 
@@ -1013,8 +963,8 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              return FutureBuilder<_Resumen>(
-                future: _calcularResumen(
+              return FutureBuilder<_Summary>(
+                future: _calculateSummary(
                   recorridosSnap.data!.docs,
                   combustibleSnap.data!.docs,
                 ),
@@ -1028,12 +978,10 @@ class _EstadisticasPageState extends State<EstadisticasPage> {
                   }
 
                   if (!resumenSnap.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(),
-                    );
+                    return const Center(child: CircularProgressIndicator());
                   }
 
-                  return _contenido(resumenSnap.data!);
+                  return _content(resumenSnap.data!);
                 },
               );
             },

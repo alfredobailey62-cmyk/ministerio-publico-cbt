@@ -1,34 +1,33 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
-class MantenimientoPage extends StatefulWidget {
-  const MantenimientoPage({super.key});
+class MaintenancePage extends StatefulWidget {
+  const MaintenancePage({super.key});
 
   @override
-  State<MantenimientoPage> createState() => _MantenimientoPageState();
+  State<MaintenancePage> createState() => _MaintenancePageState();
 }
 
-class _MantenimientoPageState extends State<MantenimientoPage> {
+class _MaintenancePageState extends State<MaintenancePage> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  static const int intervaloMantenimiento = 5000;
-  static const Color azul = Color(0xFF003580);
-  static const Color dorado = Color(0xFFD4AF37);
+  static const int maintenanceInterval = 5000;
+  static const Color blue = Color(0xFF003580);
+  static const Color gold = Color(0xFFD4AF37);
 
-  int? _numero(dynamic valor) {
+  int? _parseInt(dynamic valor) {
     if (valor is num) return valor.toInt();
     return int.tryParse(valor?.toString() ?? '');
   }
 
-  double _dinero(dynamic valor) {
+  double _parseDouble(dynamic valor) {
     if (valor is num) return valor.toDouble();
     return double.tryParse(valor?.toString() ?? '') ?? 0;
   }
 
-  String _fecha(dynamic valor) {
+  String _formatDate(dynamic valor) {
     DateTime? fecha;
 
     if (valor is Timestamp) fecha = valor.toDate();
@@ -44,30 +43,28 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
         '${fecha.minute.toString().padLeft(2, '0')}';
   }
 
-  String _usuario() {
+  String _currentUser() {
     return FirebaseAuth.instance.currentUser?.email ?? 'Usuario del sistema';
   }
 
-  int? _kmActual(Map<String, dynamic> vehiculo) {
-    return _numero(
-      vehiculo['kilometraje'] ??
-      vehiculo['km_actual'] ??
-      vehiculo['km'],
+  int? _currentMileage(Map<String, dynamic> vehiculo) {
+    return _parseInt(
+      vehiculo['kilometraje'] ?? vehiculo['km_actual'] ?? vehiculo['km'],
     );
   }
 
-  void _mensaje(String texto, {bool error = false}) {
+  void _showMessage(String texto, {bool error = false}) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(texto),
-        backgroundColor: error ? Colors.red.shade800 : azul,
+        backgroundColor: error ? Colors.red.shade800 : blue,
       ),
     );
   }
 
-  Future<void> _registrarMantenimiento() async {
+  Future<void> _registerMaintenance() async {
     final responsable = TextEditingController();
     final kmController = TextEditingController();
     final costoController = TextEditingController();
@@ -87,10 +84,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
       'Otro',
     ];
 
-    final formas = [
-      'Taller externo',
-      'Mecánicos institucionales',
-    ];
+    final formas = ['Taller externo', 'Mecánicos institucionales'];
 
     final resultado = await showDialog<bool>(
       context: context,
@@ -226,7 +220,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                 FilledButton(
                   onPressed: () async {
                     if (vehiculoId == null) {
-                      _mensaje('Seleccione un vehículo.', error: true);
+                      _showMessage('Seleccione un vehículo.', error: true);
                       return;
                     }
 
@@ -236,17 +230,20 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                     );
 
                     if (km == null || km < 0) {
-                      _mensaje('Introduzca un kilometraje válido.', error: true);
+                      _showMessage(
+                        'Introduzca un kilometraje válido.',
+                        error: true,
+                      );
                       return;
                     }
 
                     if (costo == null || costo < 0) {
-                      _mensaje('Introduzca un costo válido.', error: true);
+                      _showMessage('Introduzca un costo válido.', error: true);
                       return;
                     }
 
                     if (responsable.text.trim().isEmpty) {
-                      _mensaje('Escriba el responsable.', error: true);
+                      _showMessage('Escriba el responsable.', error: true);
                       return;
                     }
 
@@ -255,12 +252,12 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                       final vehiculo = await ref.get();
 
                       if (!vehiculo.exists) {
-                        _mensaje('El vehículo ya no existe.', error: true);
+                        _showMessage('El vehículo ya no existe.', error: true);
                         return;
                       }
 
                       final datos = vehiculo.data()!;
-                      final proximoKm = km + intervaloMantenimiento;
+                      final proximoKm = km + maintenanceInterval;
 
                       final registro = _db.collection('mantenimientos').doc();
 
@@ -281,7 +278,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                         'km': km,
                         'costo': costo,
                         'proximo_mantenimiento_km': proximoKm,
-                        'usuario': _usuario(),
+                        'usuario': _currentUser(),
                         'fecha': FieldValue.serverTimestamp(),
                       });
 
@@ -300,7 +297,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                         Navigator.pop(dialogContext, true);
                       }
                     } catch (e) {
-                      _mensaje(
+                      _showMessage(
                         'No se pudo guardar el mantenimiento: $e',
                         error: true,
                       );
@@ -321,17 +318,16 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
     detalleController.dispose();
 
     if (resultado == true) {
-      _mensaje('Mantenimiento guardado. Próximo: +5,000 km.');
+      _showMessage('Mantenimiento guardado. Próximo: +5,000 km.');
     }
   }
 
-  Future<Position?> _obtenerUbicacion() async {
+  Future<Position?> _getLocation() async {
     try {
       final habilitado = await Geolocator.isLocationServiceEnabled();
 
       if (!habilitado) {
-        _mensaje('Active el GPS para registrar la ubicación.',
-            error: true);
+        _showMessage('Active el GPS para registrar la ubicación.', error: true);
         return null;
       }
 
@@ -343,8 +339,10 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
 
       if (permiso == LocationPermission.denied ||
           permiso == LocationPermission.deniedForever) {
-        _mensaje('No hay permiso para obtener la ubicación GPS.',
-            error: true);
+        _showMessage(
+          'No hay permiso para obtener la ubicación GPS.',
+          error: true,
+        );
         return null;
       }
 
@@ -355,12 +353,12 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
         ),
       );
     } catch (e) {
-      _mensaje('No se pudo obtener el GPS: $e', error: true);
+      _showMessage('No se pudo obtener el GPS: $e', error: true);
       return null;
     }
   }
 
-  Future<void> _reportarDano() async {
+  Future<void> _reportDamage() async {
     final descripcion = TextEditingController();
     final kmController = TextEditingController();
 
@@ -424,10 +422,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                           labelText: 'Gravedad del daño',
                         ),
                         items: const [
-                          DropdownMenuItem(
-                            value: 'Leve',
-                            child: Text('Leve'),
-                          ),
+                          DropdownMenuItem(value: 'Leve', child: Text('Leve')),
                           DropdownMenuItem(
                             value: 'Moderado',
                             child: Text('Moderado'),
@@ -481,41 +476,40 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                   label: const Text('Enviar al administrador'),
                   onPressed: () async {
                     if (vehiculoId == null) {
-                      _mensaje('Seleccione el vehículo.', error: true);
+                      _showMessage('Seleccione el vehículo.', error: true);
                       return;
                     }
 
                     if (descripcion.text.trim().isEmpty) {
-                      _mensaje('Describa el daño.', error: true);
+                      _showMessage('Describa el daño.', error: true);
                       return;
                     }
 
                     final kmTexto = kmController.text.trim();
-                    final km = kmTexto.isEmpty
-                        ? null
-                        : int.tryParse(kmTexto);
+                    final km = kmTexto.isEmpty ? null : int.tryParse(kmTexto);
 
                     if (kmTexto.isNotEmpty && (km == null || km < 0)) {
-                      _mensaje('El kilometraje no es válido.', error: true);
+                      _showMessage('El kilometraje no es válido.', error: true);
                       return;
                     }
 
                     try {
                       // Intentar GPS. Si falla, el reporte se conserva
                       // sin coordenadas para no perder la emergencia.
-                      final posicion = await _obtenerUbicacion();
+                      final posicion = await _getLocation();
 
-                      final vehiculo =
-                          await _db.collection('vehiculos').doc(vehiculoId).get();
+                      final vehiculo = await _db
+                          .collection('vehiculos')
+                          .doc(vehiculoId)
+                          .get();
 
                       if (!vehiculo.exists) {
-                        _mensaje('El vehículo ya no existe.', error: true);
+                        _showMessage('El vehículo ya no existe.', error: true);
                         return;
                       }
 
                       final v = vehiculo.data()!;
-                      final reporteRef =
-                          _db.collection('reportes_danos').doc();
+                      final reporteRef = _db.collection('reportes_danos').doc();
 
                       final mensaje =
                           'Avería ${gravedad.toLowerCase()} en '
@@ -526,8 +520,8 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                       batch.set(reporteRef, {
                         'vehiculo_id': vehiculoId,
                         'placa': v['placa'] ?? '',
-                        'vehiculo':
-                            '${v['marca'] ?? ''} ${v['modelo'] ?? ''}'.trim(),
+                        'vehiculo': '${v['marca'] ?? ''} ${v['modelo'] ?? ''}'
+                            .trim(),
                         'gravedad': gravedad,
                         'descripcion': descripcion.text.trim(),
                         'kilometraje': km,
@@ -535,15 +529,11 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                         'longitud': posicion?.longitude,
                         'ubicacion': posicion == null
                             ? null
-                            : GeoPoint(
-                                posicion.latitude,
-                                posicion.longitude,
-                              ),
+                            : GeoPoint(posicion.latitude, posicion.longitude),
                         'ubicacion_disponible': posicion != null,
                         'fecha': FieldValue.serverTimestamp(),
-                        'reportado_por': _usuario(),
-                        'usuario_uid':
-                            FirebaseAuth.instance.currentUser?.uid,
+                        'reportado_por': _currentUser(),
+                        'usuario_uid': FirebaseAuth.instance.currentUser?.uid,
                         'estado': 'Pendiente',
                         'destinatario': 'admin',
                       });
@@ -567,8 +557,10 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                         Navigator.pop(dialogContext, true);
                       }
                     } catch (e) {
-                      _mensaje('No se pudo enviar el reporte: $e',
-                          error: true);
+                      _showMessage(
+                        'No se pudo enviar el reporte: $e',
+                        error: true,
+                      );
                     }
                   },
                 ),
@@ -583,18 +575,18 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
     kmController.dispose();
 
     if (resultado == true) {
-      _mensaje('Reporte registrado y aviso creado para el administrador.');
+      _showMessage('Reporte registrado y aviso creado para el administrador.');
     }
   }
 
-  Color _colorEstado(int? restante) {
+  Color _statusColor(int? restante) {
     if (restante == null) return Colors.blueGrey;
     if (restante <= 0) return Colors.red;
     if (restante <= 500) return Colors.orange;
     return Colors.green;
   }
 
-  String _estadoMantenimiento(int? restante) {
+  String _maintenanceStatus(int? restante) {
     if (restante == null) return 'Sin kilometraje actual registrado';
     if (restante < 0) {
       return 'MANTENIMIENTO VENCIDO por ${restante.abs()} km';
@@ -604,19 +596,18 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
     return 'Faltan $restante km para el próximo mantenimiento';
   }
 
-  Widget _tarjetaVehiculo(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
-  ) {
+  Widget _tarjetaVehiculo(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final v = doc.data();
     final placa = v['placa']?.toString() ?? 'Sin placa';
-    final actual = _kmActual(v);
-    final proximo = _numero(v['proximo_mantenimiento_km']);
-    final ultimo = _numero(v['ultimo_mantenimiento_km']);
+    final actual = _currentMileage(v);
+    final proximo = _parseInt(v['proximo_mantenimiento_km']);
+    final ultimo = _parseInt(v['ultimo_mantenimiento_km']);
 
-    final restante =
-        actual != null && proximo != null ? proximo - actual : null;
+    final restante = actual != null && proximo != null
+        ? proximo - actual
+        : null;
 
-    final color = _colorEstado(restante);
+    final color = _statusColor(restante);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
@@ -627,7 +618,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
           children: [
             Row(
               children: [
-                const Icon(Icons.directions_car, color: azul, size: 30),
+                const Icon(Icons.directions_car, color: blue, size: 30),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -663,11 +654,8 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    _estadoMantenimiento(restante),
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    _maintenanceStatus(restante),
+                    style: TextStyle(color: color, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
@@ -687,12 +675,12 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
     );
   }
 
-  Widget _seccionTitulo(String texto, IconData icono) {
+  Widget _sectionTitle(String texto, IconData icono) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Row(
         children: [
-          Icon(icono, color: azul),
+          Icon(icono, color: blue),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -700,7 +688,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: azul,
+                color: blue,
               ),
             ),
           ),
@@ -714,17 +702,17 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mantenimiento y averías'),
-        backgroundColor: azul,
+        backgroundColor: blue,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
             tooltip: 'Registrar mantenimiento',
-            onPressed: _registrarMantenimiento,
+            onPressed: _registerMaintenance,
             icon: const Icon(Icons.build),
           ),
           IconButton(
             tooltip: 'Reportar avería',
-            onPressed: _reportarDano,
+            onPressed: _reportDamage,
             icon: const Icon(Icons.warning_amber),
           ),
         ],
@@ -734,7 +722,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
         children: [
           FloatingActionButton.extended(
             heroTag: 'averia',
-            onPressed: _reportarDano,
+            onPressed: _reportDamage,
             backgroundColor: Colors.red.shade700,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.warning_amber),
@@ -743,8 +731,8 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
           const SizedBox(height: 10),
           FloatingActionButton.extended(
             heroTag: 'mantenimiento',
-            onPressed: _registrarMantenimiento,
-            backgroundColor: dorado,
+            onPressed: _registerMaintenance,
+            backgroundColor: gold,
             foregroundColor: Colors.black,
             icon: const Icon(Icons.add_task),
             label: const Text('Mantenimiento'),
@@ -754,10 +742,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 100),
         children: [
-          _seccionTitulo(
-            'Estado preventivo de la flota',
-            Icons.speed,
-          ),
+          _sectionTitle('Estado preventivo de la flota', Icons.speed),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _db.collection('vehiculos').snapshots(),
             builder: (context, snapshot) {
@@ -781,12 +766,10 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                 );
               }
 
-              return Column(
-                children: vehiculos.map(_tarjetaVehiculo).toList(),
-              );
+              return Column(children: vehiculos.map(_tarjetaVehiculo).toList());
             },
           ),
-          _seccionTitulo(
+          _sectionTitle(
             'Reportes de averías pendientes',
             Icons.notification_important,
           ),
@@ -825,8 +808,8 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                   final color = grave
                       ? Colors.red
                       : moderado
-                          ? Colors.orange
-                          : Colors.blueGrey;
+                      ? Colors.orange
+                      : Colors.blueGrey;
 
                   return Card(
                     margin: const EdgeInsets.symmetric(
@@ -843,26 +826,20 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                       subtitle: Text(
                         '${d['descripcion'] ?? ''}\n'
                         'Reportado: ${d['reportado_por'] ?? 'No identificado'}\n'
-                        '${_fecha(d['fecha'])}',
+                        '${_formatDate(d['fecha'])}',
                       ),
                       isThreeLine: true,
                       trailing: d['ubicacion_disponible'] == true
                           ? const Icon(Icons.location_on, color: Colors.green)
-                          : const Icon(
-                              Icons.location_off,
-                              color: Colors.grey,
-                            ),
-                      onTap: () => _mostrarDetalleAveria(doc.id, d),
+                          : const Icon(Icons.location_off, color: Colors.grey),
+                      onTap: () => _showDamageDetails(doc.id, d),
                     ),
                   );
                 }).toList(),
               );
             },
           ),
-          _seccionTitulo(
-            'Historial de mantenimientos',
-            Icons.history,
-          ),
+          _sectionTitle('Historial de mantenimientos', Icons.history),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _db
                 .collection('mantenimientos')
@@ -900,7 +877,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                     ),
                     child: ListTile(
                       leading: const CircleAvatar(
-                        backgroundColor: azul,
+                        backgroundColor: blue,
                         foregroundColor: Colors.white,
                         child: Icon(Icons.build),
                       ),
@@ -910,11 +887,11 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                       subtitle: Text(
                         'Kilometraje: ${d['km'] ?? '—'} km\n'
                         'Próximo: ${d['proximo_mantenimiento_km'] ?? '—'} km\n'
-                        'Fecha: ${_fecha(d['fecha'])}',
+                        'Fecha: ${_formatDate(d['fecha'])}',
                       ),
                       isThreeLine: true,
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _mostrarDetalleMantenimiento(d),
+                      onTap: () => _showMaintenanceDetails(d),
                     ),
                   );
                 }).toList(),
@@ -926,7 +903,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
     );
   }
 
-  void _mostrarDetalleMantenimiento(Map<String, dynamic> d) {
+  void _showMaintenanceDetails(Map<String, dynamic> d) {
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -945,8 +922,8 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                 'Próximo mantenimiento: '
                 '${d['proximo_mantenimiento_km'] ?? '—'} km',
               ),
-              Text('Costo: B/. ${_dinero(d['costo']).toStringAsFixed(2)}'),
-              Text('Fecha y hora: ${_fecha(d['fecha'])}'),
+              Text('Costo: B/. ${_parseDouble(d['costo']).toStringAsFixed(2)}'),
+              Text('Fecha y hora: ${_formatDate(d['fecha'])}'),
               Text('Registrado por: ${d['usuario'] ?? ''}'),
             ],
           ),
@@ -961,7 +938,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
     );
   }
 
-  void _mostrarDetalleAveria(String id, Map<String, dynamic> d) {
+  void _showDamageDetails(String id, Map<String, dynamic> d) {
     final lat = d['latitud'];
     final lon = d['longitud'];
 
@@ -978,7 +955,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
               Text('Descripción: ${d['descripcion'] ?? ''}'),
               Text('Kilometraje: ${d['kilometraje'] ?? 'No informado'}'),
               Text('Reportado por: ${d['reportado_por'] ?? ''}'),
-              Text('Fecha: ${_fecha(d['fecha'])}'),
+              Text('Fecha: ${_formatDate(d['fecha'])}'),
               const SizedBox(height: 10),
               if (lat != null && lon != null)
                 SelectableText('Coordenadas GPS: $lat, $lon')
@@ -998,7 +975,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                 // Copia las coordenadas para abrirlas en un mapa.
                 // No requiere paquete adicional.
                 Navigator.pop(dialogContext);
-                _mensaje('Coordenadas GPS: $lat, $lon');
+                _showMessage('Coordenadas GPS: $lat, $lon');
               },
               child: const Text('Ver coordenadas'),
             ),
@@ -1007,7 +984,7 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
               try {
                 await _db.collection('reportes_danos').doc(id).update({
                   'estado': 'Atendido',
-                  'atendido_por': _usuario(),
+                  'atendido_por': _currentUser(),
                   'fecha_atencion': FieldValue.serverTimestamp(),
                 });
 
@@ -1015,10 +992,12 @@ class _MantenimientoPageState extends State<MantenimientoPage> {
                   Navigator.pop(dialogContext);
                 }
 
-                _mensaje('Reporte marcado como atendido.');
+                _showMessage('Reporte marcado como atendido.');
               } catch (e) {
-                _mensaje('No se pudo actualizar el reporte: $e',
-                    error: true);
+                _showMessage(
+                  'No se pudo actualizar el reporte: $e',
+                  error: true,
+                );
               }
             },
             child: const Text('Marcar atendido'),

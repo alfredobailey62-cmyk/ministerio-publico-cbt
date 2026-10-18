@@ -1,52 +1,53 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:shared_preferences/shared_preferences.dart';
 
-class RecorridosPage extends StatefulWidget {
-  const RecorridosPage({super.key});
+class TripsPage extends StatefulWidget {
+  const TripsPage({super.key});
 
   @override
-  State<RecorridosPage> createState() => _RecorridosPageState();
+  State<TripsPage> createState() => _TripsPageState();
 }
 
-class _RecorridosPageState extends State<RecorridosPage> {
+class _TripsPageState extends State<TripsPage> {
   final _kmInicioController = TextEditingController();
   final _kmFinController = TextEditingController();
   final _conductorController = TextEditingController();
   final _destinoController = TextEditingController();
 
-  String? _vehiculoSeleccionado;
-  String? _placaSeleccionada;
-  String? _marcaModelo;
+  String? _selectedVehicle;
+  String? _selectedPlate;
+  String? _brandModel;
 
-  List<Map<String, dynamic>> _puntosGPS = [];
-  static StreamSubscription<Position>? _posicionStream;
-  bool _recorridoActivo = false;
-  String? _recorridoIdActivo;
+  List<Map<String, dynamic>> _gpsPoints = [];
+  static StreamSubscription<Position>? _positionStream;
+  bool _tripActive = false;
+  String? _activeTripId;
 
-  Position? _ultimaPosicion;
-  DateTime? _inicioParada;
-  bool _enParada = false;
-  List<Map<String, dynamic>> _puntosParada = [];
+  Position? _lastPosition;
+  DateTime? _stopStart;
+  bool _isStopped = false;
+  List<Map<String, dynamic>> _stopPoints = [];
 
-  static const double DISTANCIA_PARADA = 5.0;
-  static const int TIEMPO_PARADA_MINUTOS = 5;
+  static const double STOP_DISTANCE = 5.0;
+  static const int STOP_TIME_MINUTES = 5;
 
   SharedPreferences? _prefs;
 
   @override
   void initState() {
     super.initState();
-    _cargarRecorridoActivo();
+    _loadActiveTrip();
   }
 
-  Future<void> _cargarRecorridoActivo() async {
+  Future<void> _loadActiveTrip() async {
     _prefs = await SharedPreferences.getInstance();
     final recorridoGuardado = _prefs?.getString('recorrido_activo_id');
     final puntosGuardados = _prefs?.getString('puntos_activos');
@@ -55,36 +56,34 @@ class _RecorridosPageState extends State<RecorridosPage> {
       if (!mounted) return;
 
       setState(() {
-        _recorridoIdActivo = recorridoGuardado;
-        _recorridoActivo = true;
+        _activeTripId = recorridoGuardado;
+        _tripActive = true;
       });
 
       if (puntosGuardados != null) {
         final puntos = json.decode(puntosGuardados) as List;
-        _puntosGPS = puntos
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+        _gpsPoints = puntos.map((e) => Map<String, dynamic>.from(e)).toList();
       }
 
-      _reanudarGPS();
+      _resumeGps();
     }
   }
 
-  static Timer? _timerParada;
-  DateTime? _ultimoPuntoHora;
-  int _bloqueSiguiente = 0;
-  int _contadorPuntos = 0;
-  bool _subiendo = false;
-  static const int TAM_BLOQUE = 300;
+  static Timer? _stopTimer;
+  DateTime? _lastPointTime;
+  int _nextBlock = 0;
+  int _pointCounter = 0;
+  bool _uploading = false;
+  static const int BLOCK_SIZE = 300;
 
-  Future<void> _guardarRecorridoEnBackground() async {
-    if (_recorridoIdActivo == null) return;
-    await _prefs?.setString('recorrido_activo_id', _recorridoIdActivo!);
-    await _prefs?.setString('puntos_activos', json.encode(_puntosGPS));
-    await _prefs?.setInt('bloque_siguiente', _bloqueSiguiente);
+  Future<void> _saveTripInBackground() async {
+    if (_activeTripId == null) return;
+    await _prefs?.setString('recorrido_activo_id', _activeTripId!);
+    await _prefs?.setString('puntos_activos', json.encode(_gpsPoints));
+    await _prefs?.setInt('bloque_siguiente', _nextBlock);
   }
 
-  LocationSettings _ajustesGPS() {
+  LocationSettings _gpsSettings() {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return AndroidSettings(
         accuracy: LocationAccuracy.bestForNavigation,
@@ -103,9 +102,9 @@ class _RecorridosPageState extends State<RecorridosPage> {
     );
   }
 
-  Future<bool> _servicioYPermisos() async {
+  Future<bool> _checkServiceAndPermissions() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
-      _mostrarSnackbar('Active el GPS del dispositivo');
+      _showSnackbar('Active el GPS del dispositivo');
       return false;
     }
     var permiso = await Geolocator.checkPermission();
@@ -113,96 +112,104 @@ class _RecorridosPageState extends State<RecorridosPage> {
       permiso = await Geolocator.requestPermission();
     }
     if (permiso == LocationPermission.denied) {
-      _mostrarSnackbar('Se necesita permiso de ubicación');
+      _showSnackbar('Se necesita permiso de ubicación');
       return false;
     }
     if (permiso == LocationPermission.deniedForever) {
-      _mostrarSnackbar('El permiso de ubicación está denegado. Actívelo en Ajustes.');
+      _showSnackbar(
+        'El permiso de ubicación está denegado. Actívelo en Ajustes.',
+      );
       return false;
     }
     return true;
   }
 
-  void _arrancarStream() {
-    _posicionStream?.cancel();
-    _posicionStream = Geolocator.getPositionStream(
-      locationSettings: _ajustesGPS(),
-    ).listen(_alRecibirPosicion, onError: (_) {});
+  void _startStream() {
+    _positionStream?.cancel();
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: _gpsSettings(),
+    ).listen(_onPositionReceived, onError: (_) {});
 
-    _timerParada?.cancel();
-    _timerParada = Timer.periodic(const Duration(minutes: 1), (_) {
-      _revisarParada();
-      _subirBloques();
+    _stopTimer?.cancel();
+    _stopTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _checkStop();
+      _uploadBlocks();
     });
   }
 
-  Future<void> _reanudarGPS() async {
-    _bloqueSiguiente = _prefs?.getInt('bloque_siguiente') ?? 0;
-    if (!await _servicioYPermisos()) return;
-    _arrancarStream();
+  Future<void> _resumeGps() async {
+    _nextBlock = _prefs?.getInt('bloque_siguiente') ?? 0;
+    if (!await _checkServiceAndPermissions()) return;
+    _startStream();
   }
 
-  void _alRecibirPosicion(Position position) {
-    if (position.accuracy > 100 && _ultimaPosicion != null) return;
+  void _onPositionReceived(Position position) {
+    if (position.accuracy > 100 && _lastPosition != null) return;
 
     final ahora = DateTime.now();
-    if (_enParada) _registrarParada(ahora);
+    if (_isStopped) _saveStop(ahora);
 
-    _ultimaPosicion = position;
-    _ultimoPuntoHora = ahora;
+    _lastPosition = position;
+    _lastPointTime = ahora;
 
-    _puntosGPS.add(<String, dynamic>{
+    _gpsPoints.add(<String, dynamic>{
       'lat': double.parse(position.latitude.toStringAsFixed(6)),
       'lng': double.parse(position.longitude.toStringAsFixed(6)),
       'hora': ahora.toIso8601String(),
     });
 
-    _contadorPuntos++;
-    if (_contadorPuntos % 10 == 0) _guardarRecorridoEnBackground();
-    if (_puntosGPS.length >= TAM_BLOQUE) _subirBloques();
+    _pointCounter++;
+    if (_pointCounter % 10 == 0) _saveTripInBackground();
+    if (_gpsPoints.length >= BLOCK_SIZE) _uploadBlocks();
   }
 
-  Future<void> _subirBloques({bool todo = false}) async {
-    if (_subiendo || _recorridoIdActivo == null) return;
-    _subiendo = true;
+  Future<void> _uploadBlocks({bool todo = false}) async {
+    if (_uploading || _activeTripId == null) return;
+    _uploading = true;
     try {
-      while (_puntosGPS.length >= TAM_BLOQUE || (todo && _puntosGPS.isNotEmpty)) {
-        final n = _puntosGPS.length < TAM_BLOQUE ? _puntosGPS.length : TAM_BLOQUE;
-        final bloque = _puntosGPS.sublist(0, n).map((p) => Map<String, dynamic>.from(p)).toList();
+      while (_gpsPoints.length >= BLOCK_SIZE ||
+          (todo && _gpsPoints.isNotEmpty)) {
+        final n = _gpsPoints.length < BLOCK_SIZE
+            ? _gpsPoints.length
+            : BLOCK_SIZE;
+        final bloque = _gpsPoints
+            .sublist(0, n)
+            .map((p) => Map<String, dynamic>.from(p))
+            .toList();
 
         await FirebaseFirestore.instance
             .collection('recorridos')
-            .doc(_recorridoIdActivo)
+            .doc(_activeTripId)
             .collection('ruta_bloques')
-            .doc(_bloqueSiguiente.toString().padLeft(5, '0'))
-            .set({'orden': _bloqueSiguiente, 'total': n, 'puntos': bloque})
+            .doc(_nextBlock.toString().padLeft(5, '0'))
+            .set({'orden': _nextBlock, 'total': n, 'puntos': bloque})
             .timeout(const Duration(seconds: 10));
 
-        _puntosGPS.removeRange(0, n);
-        _bloqueSiguiente++;
-        await _guardarRecorridoEnBackground();
+        _gpsPoints.removeRange(0, n);
+        _nextBlock++;
+        await _saveTripInBackground();
       }
     } catch (_) {
     } finally {
-      _subiendo = false;
+      _uploading = false;
     }
   }
 
-  void _revisarParada() {
-    if (_enParada || _ultimaPosicion == null || _ultimoPuntoHora == null) return;
-    final quieto = DateTime.now().difference(_ultimoPuntoHora!);
-    if (quieto.inMinutes >= TIEMPO_PARADA_MINUTOS) {
-      _enParada = true;
-      _inicioParada = _ultimoPuntoHora;
+  void _checkStop() {
+    if (_isStopped || _lastPosition == null || _lastPointTime == null) return;
+    final quieto = DateTime.now().difference(_lastPointTime!);
+    if (quieto.inMinutes >= STOP_TIME_MINUTES) {
+      _isStopped = true;
+      _stopStart = _lastPointTime;
     }
   }
 
-  Future<void> _registrarParada(DateTime fin) async {
-    final inicio = _inicioParada;
-    final pos = _ultimaPosicion;
-    final id = _recorridoIdActivo;
-    _enParada = false;
-    _inicioParada = null;
+  Future<void> _saveStop(DateTime fin) async {
+    final inicio = _stopStart;
+    final pos = _lastPosition;
+    final id = _activeTripId;
+    _isStopped = false;
+    _stopStart = null;
     if (inicio == null || pos == null || id == null) return;
     try {
       await FirebaseFirestore.instance
@@ -210,26 +217,27 @@ class _RecorridosPageState extends State<RecorridosPage> {
           .doc(id)
           .collection('paradas')
           .add({
-        'ubicacion': GeoPoint(pos.latitude, pos.longitude),
-        'inicio': inicio,
-        'fin': fin,
-        'duracion_minutos': fin.difference(inicio).inMinutes,
-      }).timeout(const Duration(seconds: 10));
+            'ubicacion': GeoPoint(pos.latitude, pos.longitude),
+            'inicio': inicio,
+            'fin': fin,
+            'duracion_minutos': fin.difference(inicio).inMinutes,
+          })
+          .timeout(const Duration(seconds: 10));
     } catch (_) {}
   }
 
-  Future<bool> _iniciarGPS() async {
-    if (!await _servicioYPermisos()) return false;
+  Future<bool> _startGps() async {
+    if (!await _checkServiceAndPermissions()) return false;
 
-    _puntosGPS = [];
-    _bloqueSiguiente = 0;
-    _contadorPuntos = 0;
-    _ultimaPosicion = null;
-    _ultimoPuntoHora = null;
-    _inicioParada = null;
-    _enParada = false;
+    _gpsPoints = [];
+    _nextBlock = 0;
+    _pointCounter = 0;
+    _lastPosition = null;
+    _lastPointTime = null;
+    _stopStart = null;
+    _isStopped = false;
 
-    _arrancarStream();
+    _startStream();
 
     try {
       final p = await Geolocator.getCurrentPosition(
@@ -238,18 +246,18 @@ class _RecorridosPageState extends State<RecorridosPage> {
           timeLimit: Duration(seconds: 20),
         ),
       );
-      _alRecibirPosicion(p);
+      _onPositionReceived(p);
     } catch (_) {}
 
-    await _guardarRecorridoEnBackground();
-    if (mounted) setState(() => _recorridoActivo = true);
-    _mostrarSnackbar('GPS activado. Grabando recorrido');
+    await _saveTripInBackground();
+    if (mounted) setState(() => _tripActive = true);
+    _showSnackbar('GPS activado. Grabando recorrido');
     return true;
   }
 
-  Future<void> _detenerGPS() async {
-    _timerParada?.cancel();
-    _timerParada = null;
+  Future<void> _stopGps() async {
+    _stopTimer?.cancel();
+    _stopTimer = null;
 
     try {
       final p = await Geolocator.getCurrentPosition(
@@ -258,29 +266,30 @@ class _RecorridosPageState extends State<RecorridosPage> {
           timeLimit: Duration(seconds: 10),
         ),
       );
-      _alRecibirPosicion(p);
+      _onPositionReceived(p);
     } catch (_) {}
 
-    if (_enParada) await _registrarParada(DateTime.now());
+    if (_isStopped) await _saveStop(DateTime.now());
 
-    await _posicionStream?.cancel();
-    _posicionStream = null;
+    await _positionStream?.cancel();
+    _positionStream = null;
 
     var espera = 0;
-    while (_subiendo && espera < 50) {
+    while (_uploading && espera < 50) {
       await Future.delayed(const Duration(milliseconds: 300));
       espera++;
     }
-    await _subirBloques(todo: true);
+    await _uploadBlocks(todo: true);
 
-    _puntosGPS = [];
+    _gpsPoints = [];
     await _prefs?.remove('recorrido_activo_id');
     await _prefs?.remove('puntos_activos');
     await _prefs?.remove('bloque_siguiente');
 
-    if (mounted) setState(() => _recorridoActivo = false);
+    if (mounted) setState(() => _tripActive = false);
   }
-  String _formatearFechaHora(DateTime fecha) {
+
+  String _formatDateTime(DateTime fecha) {
     final dia = fecha.day.toString().padLeft(2, '0');
     final mes = fecha.month.toString().padLeft(2, '0');
     final anio = fecha.year;
@@ -290,7 +299,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
     return '$dia/$mes/$anio $hora:$minuto';
   }
 
-  String _formatearDuracion(Duration duracion) {
+  String _formatDuration(Duration duracion) {
     final horas = duracion.inHours;
     final minutos = duracion.inMinutes.remainder(60);
 
@@ -301,14 +310,14 @@ class _RecorridosPageState extends State<RecorridosPage> {
     return '$minutos min';
   }
 
-  void _mostrarFormularioInicio() {
+  void _showStartForm() {
     _kmInicioController.clear();
     _conductorController.clear();
     _destinoController.clear();
 
-    _vehiculoSeleccionado = null;
-    _placaSeleccionada = null;
-    _marcaModelo = null;
+    _selectedVehicle = null;
+    _selectedPlate = null;
+    _brandModel = null;
 
     showDialog(
       context: context,
@@ -319,10 +328,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
           ),
           title: const Row(
             children: [
-              Icon(
-                Icons.add_road,
-                color: Color(0xFF17365D),
-              ),
+              Icon(Icons.add_road, color: Color(0xFF17365D)),
               SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -350,26 +356,21 @@ class _RecorridosPageState extends State<RecorridosPage> {
                       }
 
                       if (!snapshot.hasData) {
-                        return const Center(
-                          child: CircularProgressIndicator(),
-                        );
+                        return const Center(child: CircularProgressIndicator());
                       }
 
                       final vehiculos = snapshot.data!.docs;
 
                       if (vehiculos.isEmpty) {
-                        return const Text(
-                          'No hay vehículos registrados.',
-                        );
+                        return const Text('No hay vehículos registrados.');
                       }
 
                       return DropdownButtonFormField<String>(
                         isExpanded: true,
-                        value: _vehiculoSeleccionado,
+                        value: _selectedVehicle,
                         hint: const Text('Seleccione un vehículo'),
                         items: vehiculos.map((v) {
-                          final data =
-                              v.data() as Map<String, dynamic>;
+                          final data = v.data() as Map<String, dynamic>;
 
                           return DropdownMenuItem<String>(
                             value: v.id,
@@ -388,23 +389,20 @@ class _RecorridosPageState extends State<RecorridosPage> {
                             (v) => v.id == valor,
                           );
 
-                          final data = vehiculo.data()
-                              as Map<String, dynamic>;
+                          final data = vehiculo.data() as Map<String, dynamic>;
 
                           setStateDialog(() {
-                            _vehiculoSeleccionado = valor;
-                            _placaSeleccionada =
-                                data['placa']?.toString() ?? '';
-                            _marcaModelo =
+                            _selectedVehicle = valor;
+                            _selectedPlate = data['placa']?.toString() ?? '';
+                            _brandModel =
                                 '${data['marca'] ?? ''} '
-                                '${data['modelo'] ?? ''}'.trim();
+                                        '${data['modelo'] ?? ''}'
+                                    .trim();
                           });
                         },
                         decoration: InputDecoration(
                           labelText: 'Vehículo',
-                          prefixIcon: const Icon(
-                            Icons.directions_car_outlined,
-                          ),
+                          prefixIcon: const Icon(Icons.directions_car_outlined),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -451,10 +449,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                     child: const Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          Icons.schedule,
-                          color: Color(0xFF17365D),
-                        ),
+                        Icon(Icons.schedule, color: Color(0xFF17365D)),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -501,17 +496,14 @@ class _RecorridosPageState extends State<RecorridosPage> {
                 ),
               ),
               onPressed: () async {
-                final kmInicio =
-                    int.tryParse(_kmInicioController.text.trim());
+                final kmInicio = int.tryParse(_kmInicioController.text.trim());
 
                 if (kmInicio == null ||
                     kmInicio < 0 ||
-                    _vehiculoSeleccionado == null ||
+                    _selectedVehicle == null ||
                     _conductorController.text.trim().isEmpty ||
                     _destinoController.text.trim().isEmpty) {
-                  _mostrarSnackbar(
-                    'Complete todos los campos con datos válidos.',
-                  );
+                  _showSnackbar('Complete todos los campos con datos válidos.');
                   return;
                 }
 
@@ -521,51 +513,48 @@ class _RecorridosPageState extends State<RecorridosPage> {
                   final docRef = await FirebaseFirestore.instance
                       .collection('recorridos')
                       .add({
-                    'vehiculo_id': _vehiculoSeleccionado,
-                    'placa': _placaSeleccionada,
-                    'vehiculo': _marcaModelo,
-                    'conductor': _conductorController.text.trim(),
-                    'destino': _destinoController.text.trim(),
-                    'km_inicio': kmInicio,
-                    'km_fin': null,
-                    'km_recorrido': null,
-                    'fecha_inicio': fechaHoraInicio,
-                    'fecha_salida': fechaHoraInicio,
-                    'hora_salida_str':
-                        '${fechaHoraInicio.hour.toString().padLeft(2, '0')}:'
-                        '${fechaHoraInicio.minute.toString().padLeft(2, '0')}',
-                    'fecha_inicio_str':
-                        _formatearFechaHora(fechaHoraInicio),
-                    'fecha_fin': null,
-                    'fecha_llegada': null,
-                    'tiempo_recorrido': null,
-                    'tiempo_recorrido_minutos': null,
-                    'mes': fechaHoraInicio.month,
-                    'anio': fechaHoraInicio.year,
-                    'estado': 'en_curso',
-                  });
+                        'vehiculo_id': _selectedVehicle,
+                        'placa': _selectedPlate,
+                        'vehiculo': _brandModel,
+                        'conductor': _conductorController.text.trim(),
+                        'destino': _destinoController.text.trim(),
+                        'km_inicio': kmInicio,
+                        'km_fin': null,
+                        'km_recorrido': null,
+                        'fecha_inicio': fechaHoraInicio,
+                        'fecha_salida': fechaHoraInicio,
+                        'hora_salida_str':
+                            '${fechaHoraInicio.hour.toString().padLeft(2, '0')}:'
+                            '${fechaHoraInicio.minute.toString().padLeft(2, '0')}',
+                        'fecha_inicio_str': _formatDateTime(fechaHoraInicio),
+                        'fecha_fin': null,
+                        'fecha_llegada': null,
+                        'tiempo_recorrido': null,
+                        'tiempo_recorrido_minutos': null,
+                        'mes': fechaHoraInicio.month,
+                        'anio': fechaHoraInicio.year,
+                        'estado': 'en_curso',
+                      });
 
-                  _recorridoIdActivo = docRef.id;
-                  await _guardarRecorridoEnBackground();
+                  _activeTripId = docRef.id;
+                  await _saveTripInBackground();
 
-                  final gpsIniciado = await _iniciarGPS();
+                  final gpsIniciado = await _startGps();
 
                   if (!gpsIniciado) {
                     await FirebaseFirestore.instance
                         .collection('recorridos')
                         .doc(docRef.id)
-                        .update({
-                      'estado': 'en_curso_sin_gps',
-                    });
+                        .update({'estado': 'en_curso_sin_gps'});
 
                     if (mounted) {
                       setState(() {
-                        _recorridoActivo = false;
-                        _recorridoIdActivo = null;
+                        _tripActive = false;
+                        _activeTripId = null;
                       });
                     }
 
-                    _mostrarSnackbar(
+                    _showSnackbar(
                       'Recorrido guardado, pero no se activó el GPS. '
                       'Revise los permisos y el estado del GPS.',
                     );
@@ -578,19 +567,17 @@ class _RecorridosPageState extends State<RecorridosPage> {
 
                   if (mounted) {
                     setState(() {
-                      _recorridoActivo = true;
+                      _tripActive = true;
                     });
                   }
 
-                  _mostrarSnackbar('Recorrido iniciado correctamente.');
+                  _showSnackbar('Recorrido iniciado correctamente.');
 
                   if (context.mounted) {
                     Navigator.pop(context);
                   }
                 } catch (e) {
-                  _mostrarSnackbar(
-                    'No se pudo iniciar el recorrido: $e',
-                  );
+                  _showSnackbar('No se pudo iniciar el recorrido: $e');
                 }
               },
             ),
@@ -600,7 +587,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
     );
   }
 
-  void _mostrarFormularioFinalizacion(
+  void _showCompletionForm(
     String recorridoId,
     Map<String, dynamic> recorridoActual,
   ) {
@@ -609,15 +596,10 @@ class _RecorridosPageState extends State<RecorridosPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
-            Icon(
-              Icons.flag_outlined,
-              color: Color(0xFF17365D),
-            ),
+            Icon(Icons.flag_outlined, color: Color(0xFF17365D)),
             SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -651,12 +633,8 @@ class _RecorridosPageState extends State<RecorridosPage> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      'Conductor: ${recorridoActual['conductor'] ?? '—'}',
-                    ),
-                    Text(
-                      'Destino: ${recorridoActual['destino'] ?? '—'}',
-                    ),
+                    Text('Conductor: ${recorridoActual['conductor'] ?? '—'}'),
+                    Text('Destino: ${recorridoActual['destino'] ?? '—'}'),
                     Text(
                       'Salida: ${recorridoActual['fecha_inicio_str'] ?? '—'}',
                     ),
@@ -664,9 +642,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                     Text(
                       'Kilometraje inicial: '
                       '${recorridoActual['km_inicio']} km',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
@@ -703,16 +679,12 @@ class _RecorridosPageState extends State<RecorridosPage> {
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
-              final kmFin =
-                  int.tryParse(_kmFinController.text.trim());
+              final kmFin = int.tryParse(_kmFinController.text.trim());
 
-              final kmInicio = (recorridoActual['km_inicio'] as num?)
-                  ?.toInt();
+              final kmInicio = (recorridoActual['km_inicio'] as num?)?.toInt();
 
-              if (kmFin == null ||
-                  kmInicio == null ||
-                  kmFin < kmInicio) {
-                _mostrarSnackbar(
+              if (kmFin == null || kmInicio == null || kmFin < kmInicio) {
+                _showSnackbar(
                   'El kilometraje final debe ser igual o mayor '
                   'que el kilometraje inicial.',
                 );
@@ -725,44 +697,42 @@ class _RecorridosPageState extends State<RecorridosPage> {
               final fechaHoraInicio = inicioRaw is Timestamp
                   ? inicioRaw.toDate()
                   : inicioRaw is DateTime
-                      ? inicioRaw
-                      : fechaHoraFin;
+                  ? inicioRaw
+                  : fechaHoraFin;
 
-              final duracion =
-                  fechaHoraFin.difference(fechaHoraInicio);
+              final duracion = fechaHoraFin.difference(fechaHoraInicio);
 
               final kmRecorrido = kmFin - kmInicio;
-              final tiempoRecorrido = _formatearDuracion(duracion);
+              final tiempoRecorrido = _formatDuration(duracion);
 
               try {
                 await FirebaseFirestore.instance
                     .collection('recorridos')
                     .doc(recorridoId)
                     .update({
-                  'km_fin': kmFin,
-                  'km_recorrido': kmRecorrido,
-                  'fecha_fin': fechaHoraFin,
-                  'fecha_llegada': fechaHoraFin,
-                  'hora_llegada_str':
-                      '${fechaHoraFin.hour.toString().padLeft(2, '0')}:'
-                      '${fechaHoraFin.minute.toString().padLeft(2, '0')}',
-                  'fecha_fin_str':
-                      _formatearFechaHora(fechaHoraFin),
-                  'tiempo_recorrido_minutos': duracion.inMinutes,
-                  'tiempo_recorrido': tiempoRecorrido,
-                  'estado': 'completado',
-                });
+                      'km_fin': kmFin,
+                      'km_recorrido': kmRecorrido,
+                      'fecha_fin': fechaHoraFin,
+                      'fecha_llegada': fechaHoraFin,
+                      'hora_llegada_str':
+                          '${fechaHoraFin.hour.toString().padLeft(2, '0')}:'
+                          '${fechaHoraFin.minute.toString().padLeft(2, '0')}',
+                      'fecha_fin_str': _formatDateTime(fechaHoraFin),
+                      'tiempo_recorrido_minutos': duracion.inMinutes,
+                      'tiempo_recorrido': tiempoRecorrido,
+                      'estado': 'completado',
+                    });
 
-                await _detenerGPS();
+                await _stopGps();
 
                 if (mounted) {
                   setState(() {
-                    _recorridoIdActivo = null;
-                    _puntosGPS = [];
+                    _activeTripId = null;
+                    _gpsPoints = [];
                   });
                 }
 
-                _mostrarSnackbar(
+                _showSnackbar(
                   'Recorrido finalizado: $kmRecorrido km '
                   'en $tiempoRecorrido.',
                 );
@@ -771,9 +741,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                   Navigator.pop(context);
                 }
               } catch (e) {
-                _mostrarSnackbar(
-                  'No se pudo finalizar el recorrido: $e',
-                );
+                _showSnackbar('No se pudo finalizar el recorrido: $e');
               }
             },
           ),
@@ -782,11 +750,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
     );
   }
 
-  void _verMapa(
-    String recorridoId,
-    String placa,
-    String vehiculo,
-  ) {
+  void _viewMap(String recorridoId, String placa, String vehiculo) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -799,16 +763,15 @@ class _RecorridosPageState extends State<RecorridosPage> {
     );
   }
 
-  void _mostrarSnackbar(String mensaje) {
+  void _showSnackbar(String mensaje) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(mensaje),
-        duration: const Duration(seconds: 3),
-      ),
+      SnackBar(content: Text(mensaje), duration: const Duration(seconds: 3)),
     );
-  }  @override
+  }
+
+  @override
   Widget build(BuildContext context) {
     const azul = Color(0xFF17365D);
     const dorado = Color(0xFFC6A34A);
@@ -825,7 +788,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          if (_recorridoActivo)
+          if (_tripActive)
             Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
@@ -842,11 +805,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.circle,
-                        color: Color(0xFF55D187),
-                        size: 10,
-                      ),
+                      Icon(Icons.circle, color: Color(0xFF55D187), size: 10),
                       SizedBox(width: 6),
                       Text(
                         'RECORRIDO ACTIVO',
@@ -862,7 +821,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
             ),
         ],
       ),
-      floatingActionButton: _recorridoActivo
+      floatingActionButton: _tripActive
           ? FloatingActionButton.extended(
               heroTag: 'btnStop',
               backgroundColor: const Color(0xFFB42318),
@@ -870,18 +829,15 @@ class _RecorridosPageState extends State<RecorridosPage> {
               icon: const Icon(Icons.flag),
               label: const Text('Finalizar recorrido'),
               onPressed: () async {
-                if (_recorridoIdActivo == null) return;
+                if (_activeTripId == null) return;
 
                 final doc = await FirebaseFirestore.instance
                     .collection('recorridos')
-                    .doc(_recorridoIdActivo)
+                    .doc(_activeTripId)
                     .get();
 
                 if (doc.exists && mounted) {
-                  _mostrarFormularioFinalizacion(
-                    _recorridoIdActivo!,
-                    doc.data()!,
-                  );
+                  _showCompletionForm(_activeTripId!, doc.data()!);
                 }
               },
             )
@@ -894,7 +850,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                 'Iniciar recorrido',
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
-              onPressed: _mostrarFormularioInicio,
+              onPressed: _showStartForm,
             ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -916,9 +872,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
           }
 
           if (!snapshot.hasData) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
           final recorridos = snapshot.data!.docs;
@@ -941,22 +895,13 @@ class _RecorridosPageState extends State<RecorridosPage> {
 
               return Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 1400,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 1400),
                   child: ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      padding,
-                      20,
-                      padding,
-                      100,
-                    ),
+                    padding: EdgeInsets.fromLTRB(padding, 20, padding, 100),
                     children: [
                       Text(
                         'Resumen de flota',
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
+                        style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(
                               color: azul,
                               fontWeight: FontWeight.w800,
@@ -966,9 +911,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                       Text(
                         'Consulta los recorridos, kilometrajes y '
                         'tiempos registrados.',
-                        style: TextStyle(
-                          color: Colors.blueGrey.shade700,
-                        ),
+                        style: TextStyle(color: Colors.blueGrey.shade700),
                       ),
                       const SizedBox(height: 18),
                       Wrap(
@@ -1001,17 +944,12 @@ class _RecorridosPageState extends State<RecorridosPage> {
                       const SizedBox(height: 24),
                       Row(
                         children: [
-                          const Icon(
-                            Icons.history,
-                            color: azul,
-                          ),
+                          const Icon(Icons.history, color: azul),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Historial de recorridos',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
+                              style: Theme.of(context).textTheme.titleLarge
                                   ?.copyWith(
                                     color: azul,
                                     fontWeight: FontWeight.w800,
@@ -1030,9 +968,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: const Color(0xFFE1E7EF),
-                            ),
+                            border: Border.all(color: const Color(0xFFE1E7EF)),
                           ),
                           child: const Column(
                             children: [
@@ -1054,47 +990,37 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                 'Pulsa “Iniciar recorrido” para '
                                 'registrar el primero.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.blueGrey,
-                                ),
+                                style: TextStyle(color: Colors.blueGrey),
                               ),
                             ],
                           ),
                         )
                       else
                         ...recorridos.map((doc) {
-                          final r =
-                              doc.data() as Map<String, dynamic>;
+                          final r = doc.data() as Map<String, dynamic>;
 
                           final estaActivo =
                               r['estado'] == 'en_curso' ||
                               r['estado'] == 'en_curso_sin_gps';
 
-                          final kmInicio =
-                              r['km_inicio']?.toString() ?? '—';
+                          final kmInicio = r['km_inicio']?.toString() ?? '—';
 
-                          final kmFin =
-                              r['km_fin']?.toString() ?? 'Pendiente';
+                          final kmFin = r['km_fin']?.toString() ?? 'Pendiente';
 
                           final kmRecorrido =
                               r['km_recorrido']?.toString() ?? '—';
 
                           final destino =
-                              (r['destino'] ??
-                                      'Destino no especificado')
+                              (r['destino'] ?? 'Destino no especificado')
                                   .toString();
 
-                          final placa =
-                              (r['placa'] ?? 'Sin placa').toString();
+                          final placa = (r['placa'] ?? 'Sin placa').toString();
 
-                          final conductor =
-                              (r['conductor'] ?? 'Sin conductor')
-                                  .toString();
+                          final conductor = (r['conductor'] ?? 'Sin conductor')
+                              .toString();
 
                           return Container(
-                            margin: const EdgeInsets.only(
-                              bottom: 12,
-                            ),
+                            margin: const EdgeInsets.only(bottom: 12),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
@@ -1112,12 +1038,9 @@ class _RecorridosPageState extends State<RecorridosPage> {
                               ],
                             ),
                             child: Padding(
-                              padding: EdgeInsets.all(
-                                anchoAmplio ? 20 : 14,
-                              ),
+                              padding: EdgeInsets.all(anchoAmplio ? 20 : 14),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     crossAxisAlignment:
@@ -1130,12 +1053,12 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                           color: estaActivo
                                               ? const Color(0xFFE7F7EF)
                                               : const Color(0xFFEAF0F8),
-                                          borderRadius:
-                                              BorderRadius.circular(13),
+                                          borderRadius: BorderRadius.circular(
+                                            13,
+                                          ),
                                         ),
                                         child: Icon(
-                                          Icons
-                                              .directions_car_filled_outlined,
+                                          Icons.directions_car_filled_outlined,
                                           color: estaActivo
                                               ? const Color(0xFF16835D)
                                               : azul,
@@ -1153,8 +1076,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                               '${r['vehiculo'] ?? 'Vehículo'}',
                                               style: const TextStyle(
                                                 fontSize: 16,
-                                                fontWeight:
-                                                    FontWeight.w800,
+                                                fontWeight: FontWeight.w800,
                                                 color: azul,
                                               ),
                                             ),
@@ -1162,8 +1084,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                             Text(
                                               conductor,
                                               style: TextStyle(
-                                                color: Colors
-                                                    .blueGrey.shade700,
+                                                color: Colors.blueGrey.shade700,
                                               ),
                                             ),
                                           ],
@@ -1171,8 +1092,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                       ),
                                       const SizedBox(width: 8),
                                       Container(
-                                        padding:
-                                            const EdgeInsets.symmetric(
+                                        padding: const EdgeInsets.symmetric(
                                           horizontal: 10,
                                           vertical: 6,
                                         ),
@@ -1180,8 +1100,9 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                           color: estaActivo
                                               ? const Color(0xFFE7F7EF)
                                               : const Color(0xFFEAF0F8),
-                                          borderRadius:
-                                              BorderRadius.circular(20),
+                                          borderRadius: BorderRadius.circular(
+                                            20,
+                                          ),
                                         ),
                                         child: Text(
                                           estaActivo
@@ -1205,8 +1126,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFF7F9FC),
-                                      borderRadius:
-                                          BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Row(
                                       crossAxisAlignment:
@@ -1227,8 +1147,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                                 style: TextStyle(
                                                   fontSize: 10,
                                                   letterSpacing: .8,
-                                                  fontWeight:
-                                                      FontWeight.w800,
+                                                  fontWeight: FontWeight.w800,
                                                   color: Colors.blueGrey,
                                                 ),
                                               ),
@@ -1236,8 +1155,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                               Text(
                                                 destino,
                                                 style: const TextStyle(
-                                                  fontWeight:
-                                                      FontWeight.w600,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                               ),
                                             ],
@@ -1266,9 +1184,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                       _datoRecorrido(
                                         'Distancia',
                                         kmRecorrido == '—'
-                                            ? (estaActivo
-                                                ? 'En curso'
-                                                : '—')
+                                            ? (estaActivo ? 'En curso' : '—')
                                             : '$kmRecorrido km',
                                         Icons.speed,
                                       ),
@@ -1307,10 +1223,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                     child: estaActivo
                                         ? FilledButton.icon(
                                             onPressed: () =>
-                                                _mostrarFormularioFinalizacion(
-                                              doc.id,
-                                              r,
-                                            ),
+                                                _showCompletionForm(doc.id, r),
                                             icon: const Icon(
                                               Icons.flag_outlined,
                                             ),
@@ -1318,17 +1231,17 @@ class _RecorridosPageState extends State<RecorridosPage> {
                                               'Finalizar recorrido',
                                             ),
                                             style: FilledButton.styleFrom(
-                                              backgroundColor:
-                                                  const Color(0xFF16835D),
+                                              backgroundColor: const Color(
+                                                0xFF16835D,
+                                              ),
                                               foregroundColor: Colors.white,
                                             ),
                                           )
                                         : OutlinedButton.icon(
-                                            onPressed: () => _verMapa(
+                                            onPressed: () => _viewMap(
                                               doc.id,
                                               placa,
-                                              (r['vehiculo'] ?? '')
-                                                  .toString(),
+                                              (r['vehiculo'] ?? '').toString(),
                                             ),
                                             icon: const Icon(
                                               Icons.map_outlined,
@@ -1371,9 +1284,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(
-          color: const Color(0xFFE1E7EF),
-        ),
+        border: Border.all(color: const Color(0xFFE1E7EF)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x06000000),
@@ -1409,10 +1320,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
                 const SizedBox(height: 2),
                 Text(
                   titulo,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.blueGrey,
-                  ),
+                  style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1424,24 +1332,13 @@ class _RecorridosPageState extends State<RecorridosPage> {
     );
   }
 
-  Widget _datoRecorrido(
-    String etiqueta,
-    String valor,
-    IconData icono,
-  ) {
+  Widget _datoRecorrido(String etiqueta, String valor, IconData icono) {
     return ConstrainedBox(
-      constraints: const BoxConstraints(
-        minWidth: 125,
-        maxWidth: 260,
-      ),
+      constraints: const BoxConstraints(minWidth: 125, maxWidth: 260),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icono,
-            size: 17,
-            color: const Color(0xFF68788D),
-          ),
+          Icon(icono, size: 17, color: const Color(0xFF68788D)),
           const SizedBox(width: 6),
           Flexible(
             child: Column(
@@ -1449,10 +1346,7 @@ class _RecorridosPageState extends State<RecorridosPage> {
               children: [
                 Text(
                   etiqueta,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.blueGrey,
-                  ),
+                  style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
                 ),
                 Text(
                   valor,
@@ -1477,10 +1371,10 @@ class _RecorridosPageState extends State<RecorridosPage> {
     _kmFinController.dispose();
     _conductorController.dispose();
     _destinoController.dispose();
-    _guardarRecorridoEnBackground();
+    _saveTripInBackground();
     super.dispose();
   }
-}// ========== PAGINA DEL MAPA ==========
+} // ========== PAGINA DEL MAPA ==========
 
 class MapaRecorridoPage extends StatefulWidget {
   final String recorridoId;
@@ -1495,36 +1389,45 @@ class MapaRecorridoPage extends StatefulWidget {
   });
 
   @override
-  State<MapaRecorridoPage> createState() =>
-      _MapaRecorridoPageState();
+  State<MapaRecorridoPage> createState() => _MapaRecorridoPageState();
 }
 
 class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
-  List<LatLng> _puntos = [];
-  List<Map<String, dynamic>> _paradas = [];
-  bool _cargando = true;
-  String? _errorCarga;
+  List<LatLng> _points = [];
+  List<Map<String, dynamic>> _stops = [];
+  bool _loading = true;
+  String? _loadError;
   late MapController _mapController;
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
-    _cargarDatos();
+    _loadData();
   }
 
-  Future<void> _cargarDatos() async {
+  Future<void> _loadData() async {
     try {
-      final ref = FirebaseFirestore.instance.collection('recorridos').doc(widget.recorridoId);
+      final ref = FirebaseFirestore.instance
+          .collection('recorridos')
+          .doc(widget.recorridoId);
       final puntosTemp = <LatLng>[];
 
-      final bloques = await ref.collection('ruta_bloques').orderBy('orden').get();
+      final bloques = await ref
+          .collection('ruta_bloques')
+          .orderBy('orden')
+          .get();
       for (final b in bloques.docs) {
         final lista = b.data()['puntos'];
         if (lista is List) {
           for (final p in lista) {
             if (p is Map) {
-              puntosTemp.add(LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()));
+              puntosTemp.add(
+                LatLng(
+                  (p['lat'] as num).toDouble(),
+                  (p['lng'] as num).toDouble(),
+                ),
+              );
             }
           }
         }
@@ -1534,7 +1437,9 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
         final viejo = await ref.collection('puntos_gps').orderBy('hora').get();
         for (final d in viejo.docs) {
           final m = d.data();
-          puntosTemp.add(LatLng((m['lat'] as num).toDouble(), (m['lng'] as num).toDouble()));
+          puntosTemp.add(
+            LatLng((m['lat'] as num).toDouble(), (m['lng'] as num).toDouble()),
+          );
         }
       }
 
@@ -1542,40 +1447,35 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
 
       if (!mounted) return;
       setState(() {
-        _puntos = puntosTemp;
-        _paradas = paradasSnapshot.docs.map((d) => d.data()).toList();
-        _errorCarga = null;
-        _cargando = false;
+        _points = puntosTemp;
+        _stops = paradasSnapshot.docs.map((d) => d.data()).toList();
+        _loadError = null;
+        _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorCarga = 'No se pudieron cargar los datos del mapa.\n$e';
-        _cargando = false;
+        _loadError = 'No se pudieron cargar los datos del mapa.\n$e';
+        _loading = false;
       });
     }
   }
+
   @override
   Widget build(BuildContext context) {
     const azul = Color(0xFF17365D);
 
-    if (_cargando) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final centro = _puntos.isNotEmpty
-        ? _puntos.first
+    final centro = _points.isNotEmpty
+        ? _points.first
         : const LatLng(9.4325, -82.4429);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          '${widget.placa} - ${widget.vehiculo}',
-        ),
+        title: Text('${widget.placa} - ${widget.vehiculo}'),
         backgroundColor: azul,
         foregroundColor: Colors.white,
         actions: [
@@ -1583,27 +1483,31 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
             tooltip: 'Actualizar mapa',
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              setState(() => _cargando = true);
-              _cargarDatos();
+              setState(() => _loading = true);
+              _loadData();
             },
           ),
         ],
       ),
-      body: _errorCarga != null
+      body: _loadError != null
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.cloud_off, size: 48, color: Colors.blueGrey),
+                    const Icon(
+                      Icons.cloud_off,
+                      size: 48,
+                      color: Colors.blueGrey,
+                    ),
                     const SizedBox(height: 12),
-                    Text(_errorCarga!, textAlign: TextAlign.center),
+                    Text(_loadError!, textAlign: TextAlign.center),
                     const SizedBox(height: 12),
                     ElevatedButton.icon(
                       onPressed: () {
-                        setState(() => _cargando = true);
-                        _cargarDatos();
+                        setState(() => _loading = true);
+                        _loadData();
                       },
                       icon: const Icon(Icons.refresh),
                       label: const Text('Reintentar'),
@@ -1612,7 +1516,7 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
                 ),
               ),
             )
-          : _puntos.isEmpty
+          : _points.isEmpty
           ? const Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
@@ -1635,18 +1539,26 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
             )
           : FlutterMap(
               mapController: _mapController,
-              options: MapOptions(initialCenter: centro, initialZoom: 14, initialCameraFit: _puntos.length > 1 ? CameraFit.bounds(bounds: LatLngBounds.fromPoints(_puntos), padding: const EdgeInsets.all(40)) : null),
+              options: MapOptions(
+                initialCenter: centro,
+                initialZoom: 14,
+                initialCameraFit: _points.length > 1
+                    ? CameraFit.bounds(
+                        bounds: LatLngBounds.fromPoints(_points),
+                        padding: const EdgeInsets.all(40),
+                      )
+                    : null,
+              ),
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName:
-                      'com.ministerio.publico.cbt',
+                  userAgentPackageName: 'com.ministerio.publico.cbt',
                 ),
-                if (_puntos.isNotEmpty)
+                if (_points.isNotEmpty)
                   PolylineLayer(
                     polylines: [
                       Polyline(
-                        points: _puntos,
+                        points: _points,
                         strokeWidth: 4,
                         color: const Color(0xFF2F65B0),
                       ),
@@ -1654,9 +1566,9 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
                   ),
                 MarkerLayer(
                   markers: [
-                    if (_puntos.isNotEmpty)
+                    if (_points.isNotEmpty)
                       Marker(
-                        point: _puntos.first,
+                        point: _points.first,
                         width: 50,
                         height: 50,
                         child: const Icon(
@@ -1665,9 +1577,9 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
                           size: 40,
                         ),
                       ),
-                    if (_puntos.length > 1)
+                    if (_points.length > 1)
                       Marker(
-                        point: _puntos.last,
+                        point: _points.last,
                         width: 50,
                         height: 50,
                         child: const Icon(
@@ -1676,14 +1588,12 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
                           size: 40,
                         ),
                       ),
-                    for (final parada in _paradas)
-                      if (parada['ubicacion'] is GeoPoint)
+                    for (final stop in _stops)
+                      if (stop['ubicacion'] is GeoPoint)
                         Marker(
                           point: LatLng(
-                            (parada['ubicacion'] as GeoPoint)
-                                .latitude,
-                            (parada['ubicacion'] as GeoPoint)
-                                .longitude,
+                            (stop['ubicacion'] as GeoPoint).latitude,
+                            (stop['ubicacion'] as GeoPoint).longitude,
                           ),
                           width: 45,
                           height: 45,
@@ -1700,4 +1610,3 @@ class _MapaRecorridoPageState extends State<MapaRecorridoPage> {
     );
   }
 }
-

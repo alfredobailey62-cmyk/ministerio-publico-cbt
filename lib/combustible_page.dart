@@ -6,30 +6,30 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-class CombustiblePage extends StatefulWidget {
-  const CombustiblePage({super.key});
+class FuelPage extends StatefulWidget {
+  const FuelPage({super.key});
 
   @override
-  State<CombustiblePage> createState() => _CombustiblePageState();
+  State<FuelPage> createState() => _FuelPageState();
 }
 
-class _CombustiblePageState extends State<CombustiblePage> {
+class _FuelPageState extends State<FuelPage> {
   static const Color azul = Color(0xFF003580);
 
-  final _placaController = TextEditingController();
-  final _kmController = TextEditingController();
-  final _cantidadController = TextEditingController();
+  final _plateController = TextEditingController();
+  final _mileageController = TextEditingController();
+  final _quantityController = TextEditingController();
 
-  Map<String, dynamic>? _vehiculo;
-  String? _vehiculoId;
-  String _unidad = 'Litros';
-  String _nivelTanque = 'Medio tanque';
+  Map<String, dynamic>? _vehicle;
+  String? _vehicleId;
+  String _unit = 'Litros';
+  String _tankLevel = 'Medio tanque';
   Uint8List? _imagenBytes;
-  bool _buscando = false;
-  bool _guardando = false;
-  String? _error;
+  bool _searching = false;
+  bool _saving = false;
+  String? _errorMessage;
 
-  final List<String> _nivelesTanque = const [
+  final List<String> _tankLevels = const [
     'Vacío',
     '1/4 de tanque',
     'Medio tanque',
@@ -39,43 +39,44 @@ class _CombustiblePageState extends State<CombustiblePage> {
 
   @override
   void dispose() {
-    _placaController.dispose();
-    _kmController.dispose();
-    _cantidadController.dispose();
+    _plateController.dispose();
+    _mileageController.dispose();
+    _quantityController.dispose();
     super.dispose();
   }
 
-  String _normalizarPlaca(String placa) =>
+  String _normalizePlate(String placa) =>
       placa.trim().toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
 
-  double _aLitros(double cantidad) =>
-      _unidad == 'Galones' ? cantidad * 3.785411784 : cantidad;
+  double _toLiters(double cantidad) =>
+      _unit == 'Galones' ? cantidad * 3.785411784 : cantidad;
 
-  Future<void> _buscarVehiculo() async {
-    final placa = _normalizarPlaca(_placaController.text);
+  Future<void> _findVehicle() async {
+    final placa = _normalizePlate(_plateController.text);
 
     if (placa.isEmpty) {
-      setState(() => _error = 'Escriba la placa del vehículo.');
+      setState(() => _errorMessage = 'Escriba la placa del vehículo.');
       return;
     }
 
     setState(() {
-      _buscando = true;
-      _error = null;
-      _vehiculo = null;
-      _vehiculoId = null;
+      _searching = true;
+      _errorMessage = null;
+      _vehicle = null;
+      _vehicleId = null;
     });
 
     try {
-      final snapshot =
-          await FirebaseFirestore.instance.collection('vehiculos').get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('vehiculos')
+          .get();
 
       QueryDocumentSnapshot<Map<String, dynamic>>? encontrado;
 
       for (final doc in snapshot.docs) {
         final datos = doc.data();
 
-        if (_normalizarPlaca((datos['placa'] ?? '').toString()) == placa) {
+        if (_normalizePlate((datos['placa'] ?? '').toString()) == placa) {
           encontrado = doc;
           break;
         }
@@ -85,104 +86,100 @@ class _CombustiblePageState extends State<CombustiblePage> {
 
       if (encontrado == null) {
         setState(() {
-          _error =
+          _errorMessage =
               'No se encontró esa placa. Verifique que el vehículo esté registrado.';
         });
       } else {
         setState(() {
-          _vehiculoId = encontrado!.id;
-          _vehiculo = encontrado.data();
-          _error = null;
+          _vehicleId = encontrado!.id;
+          _vehicle = encontrado.data();
+          _errorMessage = null;
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _error = 'No se pudo consultar el vehículo: $e');
+        setState(() => _errorMessage = 'No se pudo consultar el vehículo: $e');
       }
     } finally {
       if (mounted) {
-        setState(() => _buscando = false);
+        setState(() => _searching = false);
       }
     }
   }
 
-  Future<String?> _subirComprobante(String placa) async {
+  Future<String?> _uploadReceipt(String placa) async {
     if (_imagenBytes == null) return null;
 
     final nombre =
-        '${_normalizarPlaca(placa)}-${DateTime.now().millisecondsSinceEpoch}.jpg';
+        '${_normalizePlate(placa)}-${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    final ref = FirebaseStorage.instance
-        .ref()
-        .child('comprobantes_combustible/$nombre');
+    final ref = FirebaseStorage.instance.ref().child(
+      'comprobantes_combustible/$nombre',
+    );
 
     await ref.putData(_imagenBytes!);
 
     return ref.getDownloadURL();
   }
 
-  Future<void> _guardarRegistro() async {
-    if (_vehiculoId == null || _vehiculo == null) {
+  Future<void> _saveRecord() async {
+    if (_vehicleId == null || _vehicle == null) {
       setState(() {
-        _error = 'Primero busque y confirme la placa del vehículo.';
+        _errorMessage = 'Primero busque y confirme la placa del vehículo.';
       });
       return;
     }
 
-    final kmTexto = _kmController.text.trim().replaceAll(',', '.');
-    final cantidadTexto =
-        _cantidadController.text.trim().replaceAll(',', '.');
+    final kmTexto = _mileageController.text.trim().replaceAll(',', '.');
+    final cantidadTexto = _quantityController.text.trim().replaceAll(',', '.');
 
     final km = double.tryParse(kmTexto);
     final cantidad = double.tryParse(cantidadTexto);
 
     if (km == null || km < 0) {
-      setState(() => _error = 'Ingrese un kilometraje válido.');
+      setState(() => _errorMessage = 'Ingrese un kilometraje válido.');
       return;
     }
 
     if (cantidad == null || cantidad <= 0) {
       setState(() {
-        _error = 'Ingrese una cantidad de combustible mayor que cero.';
+        _errorMessage = 'Ingrese una cantidad de combustible mayor que cero.';
       });
       return;
     }
 
     setState(() {
-      _guardando = true;
-      _error = null;
+      _saving = true;
+      _errorMessage = null;
     });
 
     try {
       final ahora = DateTime.now();
       final usuario = FirebaseAuth.instance.currentUser;
 
-      final placa =
-          (_vehiculo!['placa'] ?? _placaController.text).toString();
+      final placa = (_vehicle!['placa'] ?? _plateController.text).toString();
 
-      final litros = _aLitros(cantidad);
-      final comprobante = await _subirComprobante(placa);
+      final litros = _toLiters(cantidad);
+      final comprobante = await _uploadReceipt(placa);
 
       await FirebaseFirestore.instance.collection('combustible').add({
-        'vehiculo_id': _vehiculoId,
+        'vehiculo_id': _vehicleId,
         'placa': placa,
-        'marca': (_vehiculo!['marca'] ?? '').toString(),
-        'modelo': (_vehiculo!['modelo'] ?? '').toString(),
+        'marca': (_vehicle!['marca'] ?? '').toString(),
+        'modelo': (_vehicle!['modelo'] ?? '').toString(),
         'kilometraje': km,
         'cantidad_ingresada': cantidad,
-        'unidad_ingresada': _unidad,
+        'unidad_ingresada': _unit,
         'litros_equivalentes': litros,
-        'nivel_tanque': _nivelTanque,
+        'nivel_tanque': _tankLevel,
         'comprobante_url': comprobante ?? '',
         'fecha': Timestamp.fromDate(ahora),
         'mes': ahora.month,
         'anio': ahora.year,
-        'mes_anio':
-            '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
+        'mes_anio': '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
         'usuario_uid': usuario?.uid ?? '',
-        'usuario_nombre': usuario?.displayName ??
-            usuario?.email ??
-            'Usuario no identificado',
+        'usuario_nombre':
+            usuario?.displayName ?? usuario?.email ?? 'Usuario no identificado',
         'usuario_email': usuario?.email ?? '',
         'creado_en': FieldValue.serverTimestamp(),
       });
@@ -190,35 +187,33 @@ class _CombustiblePageState extends State<CombustiblePage> {
       if (!mounted) return;
 
       setState(() {
-        _kmController.clear();
-        _cantidadController.clear();
-        _placaController.clear();
-        _vehiculo = null;
-        _vehiculoId = null;
+        _mileageController.clear();
+        _quantityController.clear();
+        _plateController.clear();
+        _vehicle = null;
+        _vehicleId = null;
         _imagenBytes = null;
-        _unidad = 'Litros';
-        _nivelTanque = 'Medio tanque';
+        _unit = 'Litros';
+        _tankLevel = 'Medio tanque';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Registro de combustible guardado.'),
-        ),
+        const SnackBar(content: Text('Registro de combustible guardado.')),
       );
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'No se pudo guardar el registro: $e';
+          _errorMessage = 'No se pudo guardar el registro: $e';
         });
       }
     } finally {
       if (mounted) {
-        setState(() => _guardando = false);
+        setState(() => _saving = false);
       }
     }
   }
 
-  String _fechaHora(dynamic valor) {
+  String _formatDateTime(dynamic valor) {
     DateTime? fecha;
 
     if (valor is Timestamp) fecha = valor.toDate();
@@ -234,7 +229,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
     return '$d/$m/${fecha.year} $h:$min';
   }
 
-  String _mesActual() {
+  String _currentMonthName() {
     const meses = [
       'enero',
       'febrero',
@@ -255,7 +250,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
     return '${meses[ahora.month - 1]} ${ahora.year}';
   }
 
-  Widget _crearFormulario() {
+  Widget _buildForm() {
     return Card(
       margin: const EdgeInsets.all(12),
       child: Padding(
@@ -265,10 +260,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
           children: [
             const Text(
               'Registrar carga de combustible',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             const Text(
@@ -279,7 +271,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
               children: [
                 Expanded(
                   child: TextField(
-                    controller: _placaController,
+                    controller: _plateController,
                     textCapitalization: TextCapitalization.characters,
                     decoration: const InputDecoration(
                       labelText: 'Placa del vehículo',
@@ -287,32 +279,30 @@ class _CombustiblePageState extends State<CombustiblePage> {
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.directions_car),
                     ),
-                    onSubmitted: (_) => _buscarVehiculo(),
+                    onSubmitted: (_) => _findVehicle(),
                   ),
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: _buscando ? null : _buscarVehiculo,
+                    onPressed: _searching ? null : _findVehicle,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: azul,
                       foregroundColor: Colors.white,
                     ),
-                    child: _buscando
+                    child: _searching
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('Buscar'),
                   ),
                 ),
               ],
             ),
-            if (_vehiculo != null) ...[
+            if (_vehicle != null) ...[
               const SizedBox(height: 12),
               Container(
                 width: double.infinity,
@@ -324,19 +314,18 @@ class _CombustiblePageState extends State<CombustiblePage> {
                 ),
                 child: Text(
                   'Vehículo identificado\n'
-                  '${_vehiculo!['placa'] ?? ''} · '
-                  '${_vehiculo!['marca'] ?? ''} '
-                  '${_vehiculo!['modelo'] ?? ''}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  '${_vehicle!['placa'] ?? ''} · '
+                  '${_vehicle!['marca'] ?? ''} '
+                  '${_vehicle!['modelo'] ?? ''}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: _kmController,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                controller: _mileageController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: const InputDecoration(
                   labelText: 'Kilometraje actual del vehículo',
                   hintText: 'Ej. 85420',
@@ -347,56 +336,49 @@ class _CombustiblePageState extends State<CombustiblePage> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _unidad,
+                value: _unit,
                 decoration: const InputDecoration(
                   labelText: 'Unidad de combustible',
                   border: OutlineInputBorder(),
                 ),
                 items: const [
-                  DropdownMenuItem(
-                    value: 'Litros',
-                    child: Text('Litros'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Galones',
-                    child: Text('Galones'),
-                  ),
+                  DropdownMenuItem(value: 'Litros', child: Text('Litros')),
+                  DropdownMenuItem(value: 'Galones', child: Text('Galones')),
                 ],
                 onChanged: (v) {
-                  setState(() => _unidad = v ?? 'Litros');
+                  setState(() => _unit = v ?? 'Litros');
                 },
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: _cantidadController,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                controller: _quantityController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: InputDecoration(
                   labelText: 'Cantidad cargada',
-                  hintText: _unidad == 'Litros' ? 'Ej. 35.5' : 'Ej. 9.4',
-                  suffixText: _unidad == 'Litros' ? 'L' : 'gal',
+                  hintText: _unit == 'Litros' ? 'Ej. 35.5' : 'Ej. 9.4',
+                  suffixText: _unit == 'Litros' ? 'L' : 'gal',
                   border: const OutlineInputBorder(),
                   prefixIcon: const Icon(Icons.local_gas_station),
                 ),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _nivelTanque,
+                value: _tankLevel,
                 decoration: const InputDecoration(
                   labelText: 'Nivel aproximado del tanque después de cargar',
                   border: OutlineInputBorder(),
                 ),
-                items: _nivelesTanque
+                items: _tankLevels
                     .map(
-                      (nivel) => DropdownMenuItem(
-                        value: nivel,
-                        child: Text(nivel),
-                      ),
+                      (nivel) =>
+                          DropdownMenuItem(value: nivel, child: Text(nivel)),
                     )
                     .toList(),
                 onChanged: (v) {
                   setState(() {
-                    _nivelTanque = v ?? 'Medio tanque';
+                    _tankLevel = v ?? 'Medio tanque';
                   });
                 },
               ),
@@ -436,44 +418,34 @@ class _CombustiblePageState extends State<CombustiblePage> {
                       : 'Cambiar comprobante',
                 ),
               ),
-              if (_error != null) ...[
+              if (_errorMessage != null) ...[
                 const SizedBox(height: 8),
-                Text(
-                  _error!,
-                  style: const TextStyle(color: Colors.red),
-                ),
+                Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
               ],
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _guardando ? null : _guardarRegistro,
+                  onPressed: _saving ? null : _saveRecord,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: azul,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  icon: _guardando
+                  icon: _saving
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.save),
-                  label: Text(
-                    _guardando ? 'Guardando...' : 'Guardar registro',
-                  ),
+                  label: Text(_saving ? 'Guardando...' : 'Guardar registro'),
                 ),
               ),
             ],
-            if (_error != null && _vehiculo == null) ...[
+            if (_errorMessage != null && _vehicle == null) ...[
               const SizedBox(height: 8),
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.red),
-              ),
+              Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
             ],
           ],
         ),
@@ -488,14 +460,8 @@ class _CombustiblePageState extends State<CombustiblePage> {
 
     final consulta = FirebaseFirestore.instance
         .collection('combustible')
-        .where(
-          'fecha',
-          isGreaterThanOrEqualTo: Timestamp.fromDate(inicio),
-        )
-        .where(
-          'fecha',
-          isLessThan: Timestamp.fromDate(fin),
-        );
+        .where('fecha', isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
+        .where('fecha', isLessThan: Timestamp.fromDate(fin));
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: consulta.snapshots(),
@@ -512,9 +478,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
         if (!snapshot.hasData) {
           return const Padding(
             padding: EdgeInsets.all(20),
-            child: Center(
-              child: CircularProgressIndicator(),
-            ),
+            child: Center(child: CircularProgressIndicator()),
           );
         }
 
@@ -528,12 +492,11 @@ class _CombustiblePageState extends State<CombustiblePage> {
 
           final litros =
               (d['litros_equivalentes'] as num?)?.toDouble() ??
-                  (d['litros'] as num?)?.toDouble() ??
-                  0.0;
+              (d['litros'] as num?)?.toDouble() ??
+              0.0;
 
           totalLitros += litros;
-          litrosPorVehiculo[id] =
-              (litrosPorVehiculo[id] ?? 0) + litros;
+          litrosPorVehiculo[id] = (litrosPorVehiculo[id] ?? 0) + litros;
         }
 
         return Column(
@@ -542,7 +505,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Text(
-                'Resumen de ${_mesActual()}',
+                'Resumen de ${_currentMonthName()}',
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -550,20 +513,14 @@ class _CombustiblePageState extends State<CombustiblePage> {
               ),
             ),
             Card(
-              margin: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
                     const CircleAvatar(
                       backgroundColor: azul,
-                      child: Icon(
-                        Icons.local_gas_station,
-                        color: Colors.white,
-                      ),
+                      child: Icon(Icons.local_gas_station, color: Colors.white),
                     ),
                     const SizedBox(width: 12),
                     const Expanded(
@@ -583,41 +540,39 @@ class _CombustiblePageState extends State<CombustiblePage> {
             if (registros.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Text(
-                  'Todavía no hay cargas registradas este mes.',
-                ),
+                child: Text('Todavía no hay cargas registradas este mes.'),
               )
             else
               ...litrosPorVehiculo.entries.map((entrada) {
-                final docsVehiculo = registros
-                    .where(
-                      (doc) =>
-                          (doc.data()['vehiculo_id'] ?? '').toString() ==
-                          entrada.key,
-                    )
-                    .toList()
-                  ..sort((a, b) {
-                    final da = a.data()['fecha'];
-                    final db = b.data()['fecha'];
+                final docsVehiculo =
+                    registros
+                        .where(
+                          (doc) =>
+                              (doc.data()['vehiculo_id'] ?? '').toString() ==
+                              entrada.key,
+                        )
+                        .toList()
+                      ..sort((a, b) {
+                        final da = a.data()['fecha'];
+                        final db = b.data()['fecha'];
 
-                    final ta = da is Timestamp
-                        ? da.millisecondsSinceEpoch
-                        : 0;
+                        final ta = da is Timestamp
+                            ? da.millisecondsSinceEpoch
+                            : 0;
 
-                    final tb = db is Timestamp
-                        ? db.millisecondsSinceEpoch
-                        : 0;
+                        final tb = db is Timestamp
+                            ? db.millisecondsSinceEpoch
+                            : 0;
 
-                    return tb.compareTo(ta);
-                  });
+                        return tb.compareTo(ta);
+                      });
 
                 final ultimo = docsVehiculo.first.data();
 
                 final placa = (ultimo['placa'] ?? 'Vehículo').toString();
 
                 final marcaModelo =
-                    '${ultimo['marca'] ?? ''} ${ultimo['modelo'] ?? ''}'
-                        .trim();
+                    '${ultimo['marca'] ?? ''} ${ultimo['modelo'] ?? ''}'.trim();
 
                 // Estimación orientativa según kilometrajes y cargas.
                 // No es una inteligencia artificial entrenada.
@@ -625,25 +580,20 @@ class _CombustiblePageState extends State<CombustiblePage> {
 
                 if (docsVehiculo.length >= 2) {
                   final recientes = docsVehiculo
-                      .where(
-                        (d) => d.data()['kilometraje'] is num,
-                      )
+                      .where((d) => d.data()['kilometraje'] is num)
                       .toList();
 
                   if (recientes.length >= 2) {
-                    final kmNuevo =
-                        (recientes[0].data()['kilometraje'] as num)
-                            .toDouble();
+                    final kmNuevo = (recientes[0].data()['kilometraje'] as num)
+                        .toDouble();
 
                     final kmAnterior =
-                        (recientes[1].data()['kilometraje'] as num)
-                            .toDouble();
+                        (recientes[1].data()['kilometraje'] as num).toDouble();
 
                     final litrosAnterior =
-                        ((recientes[1].data()['litros_equivalentes']
-                                    as num?)
-                                ?.toDouble() ??
-                            0);
+                        ((recientes[1].data()['litros_equivalentes'] as num?)
+                            ?.toDouble() ??
+                        0);
 
                     final diferencia = kmNuevo - kmAnterior;
 
@@ -659,15 +609,10 @@ class _CombustiblePageState extends State<CombustiblePage> {
                     vertical: 6,
                   ),
                   child: ExpansionTile(
-                    leading: const Icon(
-                      Icons.directions_car,
-                      color: azul,
-                    ),
+                    leading: const Icon(Icons.directions_car, color: azul),
                     title: Text(
                       placa,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text(
                       '$marcaModelo · '
@@ -692,9 +637,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
                       else
                         const ListTile(
                           leading: Icon(Icons.insights),
-                          title: Text(
-                            'Rendimiento aún no disponible',
-                          ),
+                          title: Text('Rendimiento aún no disponible'),
                           subtitle: Text(
                             'Se necesitan cargas consecutivas con '
                             'kilometrajes crecientes para estimarlo.',
@@ -704,32 +647,29 @@ class _CombustiblePageState extends State<CombustiblePage> {
                       ...docsVehiculo.map((doc) {
                         final d = doc.data();
 
-                        final fecha = _fechaHora(d['fecha']);
+                        final fecha = _formatDateTime(d['fecha']);
 
                         final km =
-                            (d['kilometraje'] as num?)
-                                    ?.toStringAsFixed(0) ??
-                                'No indicado';
+                            (d['kilometraje'] as num?)?.toStringAsFixed(0) ??
+                            'No indicado';
 
                         final litros =
-                            ((d['litros_equivalentes'] as num?)
-                                    ?.toDouble() ??
-                                (d['litros'] as num?)?.toDouble() ??
-                                0);
+                            ((d['litros_equivalentes'] as num?)?.toDouble() ??
+                            (d['litros'] as num?)?.toDouble() ??
+                            0);
 
                         final usuario =
-                            (d['usuario_nombre'] ??
-                                    'Usuario no identificado')
+                            (d['usuario_nombre'] ?? 'Usuario no identificado')
                                 .toString();
 
-                        final cantidad =
-                            (d['cantidad_ingresada'] as num?)?.toDouble();
+                        final cantidad = (d['cantidad_ingresada'] as num?)
+                            ?.toDouble();
 
-                        final unidad =
-                            (d['unidad_ingresada'] ?? 'Litros').toString();
+                        final unidad = (d['unidad_ingresada'] ?? 'Litros')
+                            .toString();
 
-                        final nivel =
-                            (d['nivel_tanque'] ?? 'No indicado').toString();
+                        final nivel = (d['nivel_tanque'] ?? 'No indicado')
+                            .toString();
 
                         return ListTile(
                           leading: const Icon(Icons.receipt_long),
@@ -764,12 +704,7 @@ class _CombustiblePageState extends State<CombustiblePage> {
         foregroundColor: Colors.white,
         title: const Text('Control de combustible'),
       ),
-      body: ListView(
-        children: [
-          _crearFormulario(),
-          _resumenMensual(),
-        ],
-      ),
+      body: ListView(children: [_buildForm(), _resumenMensual()]),
     );
   }
 }

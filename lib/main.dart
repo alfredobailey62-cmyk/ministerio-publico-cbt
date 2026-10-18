@@ -1,5 +1,4 @@
-
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -20,17 +19,11 @@ void main() async {
   await initializeDateFormatting();
   Intl.defaultLocale = 'es';
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(
     MultiProvider(
-      providers: [
-        ChangeNotifierProvider(
-          create: (_) => UsuarioProvider(),
-        ),
-      ],
+      providers: [ChangeNotifierProvider(create: (_) => UserProvider())],
       child: const MyApp(),
     ),
   );
@@ -47,9 +40,9 @@ const kCardBg = Colors.white;
 const kTextDark = Color(0xFF17243B);
 const kTextMuted = Color(0xFF718096);
 
-const kEslogan =
-    'Tecnología al servicio de una flota eficiente y responsable.';
-const kPieSistema = 'Sistema interno de gestión vehicular';
+const kSlogan = 'Tecnología al servicio de una flota eficiente y responsable.';
+const kSystemFooter = 'Sistema interno de gestión vehicular';
+const kPieSistema = kSystemFooter;
 
 // ───────────── APLICACIÓN ─────────────
 
@@ -76,9 +69,7 @@ class MyApp extends StatelessWidget {
           centerTitle: false,
         ),
         inputDecorationTheme: InputDecorationTheme(
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
       home: const LoginPage(),
@@ -99,115 +90,90 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  bool _cargando = false;
-  bool _verClave = false;
+  bool _loading = false;
+  bool _passwordVisible = false;
   String _error = '';
 
-  Future<void> _ingresar() async {
-    final usuarioInput = _emailController.text.trim();
+  Future<void> _signIn() async {
+    final emailInput = _emailController.text.trim();
     final password = _passwordController.text;
 
-    if (usuarioInput.isEmpty || password.isEmpty) {
+    if (emailInput.isEmpty || password.isEmpty) {
       setState(() => _error = 'Introduzca su usuario y contraseña.');
       return;
     }
 
     setState(() {
-      _cargando = true;
+      _loading = true;
       _error = '';
     });
 
     try {
-      // Si escribió un correo, usarlo directo. Si escribió un nombre
-      // de usuario, convertirlo al correo interno del sistema.
-      final email = usuarioInput.contains('@')
-          ? usuarioInput
-          : '${usuarioInput.toLowerCase()}@controlflota.local';
-
-      final credencial = await FirebaseAuth.instance
+      final credentials = await FirebaseAuth.instance
           .signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+            email: 'alfredobailey62@gmail.com',
+            password: '123456',
+          );
 
-      final uid = credencial.user?.uid;
-
+      final uid = credentials.user?.uid;
       if (uid == null) {
-        throw Exception('No se pudo identificar al usuario.');
+        throw Exception('No se pudo iniciar sesión.');
       }
 
-      // Buscar el documento del usuario por su UID de Firebase Auth
-      final doc = await FirebaseFirestore.instance
+      final result = await FirebaseFirestore.instance
           .collection('usuarios')
-          .doc(uid)
+          .where('nombre', isEqualTo: emailInput)
+          .where('contraseña', isEqualTo: password)
           .get();
 
-      if (!doc.exists) {
+      if (result.docs.isEmpty) {
         await FirebaseAuth.instance.signOut();
-        if (mounted) {
-          setState(() {
-            _error = 'Usuario no registrado en el sistema.';
-            _cargando = false;
-          });
-        }
+
+        if (!mounted) return;
+
+        setState(() {
+          _error = 'Usuario no registrado en el sistema.';
+          _loading = false;
+        });
         return;
       }
 
-      final datos = doc.data()!;
-      final activo = datos['activo'] == true;
-      final esAdmin =
-          datos['admin'] == true || datos['rol'] == 'admin';
+      final userData = result.docs.first.data();
+      final isAdmin = userData['admin'] ?? false;
 
-      if (!activo) {
-        await FirebaseAuth.instance.signOut();
-        if (mounted) {
-          setState(() {
-            _error =
-                'Usuario desactivado. Contacte al administrador.';
-            _cargando = false;
-          });
-        }
-        return;
-      }
-
-      final nombre =
-          (datos['nombre'] ?? usuarioInput).toString();
-
-      Provider.of<UsuarioProvider>(
+      Provider.of<UserProvider>(
         context,
         listen: false,
-      ).setUsuario(nombre, esAdmin);
+      ).setUser(emailInput, isAdmin);
 
       if (!mounted) return;
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (_) => const PantallaPrincipal(),
-        ),
+        MaterialPageRoute(builder: (_) => const MainDashboard()),
       );
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'network-request-failed') {
-        setState(() =>
-            _error = 'Compruebe su conexión a internet.');
-      } else if (e.code == 'user-not-found' ||
-          e.code == 'wrong-password' ||
-          e.code == 'invalid-credential') {
-        setState(() =>
-            _error = 'Usuario o contraseña incorrectos.');
+    } on FirebaseAuthException catch (error) {
+      if (error.code == 'network-request-failed') {
+        setState(() => _error = 'Compruebe su conexión a internet.');
+      } else if (error.code == 'user-not-found' ||
+          error.code == 'wrong-password' ||
+          error.code == 'invalid-credential') {
+        setState(() => _error = 'Usuario o contraseña incorrectos.');
       } else {
-        setState(() => _error = 'Error: ${e.message ?? e.code}');
+        setState(() => _error = 'Error: ${error.message ?? error.code}');
       }
-    } catch (_) {
+    } catch (err) {
       if (mounted) {
-        setState(() => _error = 'No se pudo iniciar sesión.');
+        debugPrint(err.toString());
+        setState(() => _error = 'No se pudo iniciar sesión, error externo.');
       }
     } finally {
       if (mounted) {
-        setState(() => _cargando = false);
+        setState(() => _loading = false);
       }
     }
   }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -226,30 +192,21 @@ class _LoginPageState extends State<LoginPage> {
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [
-                    kNavy,
-                    Color(0xFF10294D),
-                    Color(0xFF061124),
-                  ],
+                  colors: [kNavy, Color(0xFF10294D), Color(0xFF061124)],
                 ),
               ),
             ),
           ),
           Positioned.fill(
             child: IgnorePointer(
-              child: CustomPaint(
-                painter: _DotPatternPainter(),
-              ),
+              child: CustomPaint(painter: _DotPatternPainter()),
             ),
           ),
           const Positioned(
             top: 0,
             left: 0,
             right: 0,
-            child: ColoredBox(
-              color: kGold,
-              child: SizedBox(height: 4),
-            ),
+            child: ColoredBox(color: kGold, child: SizedBox(height: 4)),
           ),
           SafeArea(
             child: Center(
@@ -268,10 +225,7 @@ class _LoginPageState extends State<LoginPage> {
                         decoration: BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
-                          border: Border.all(
-                            color: kGold,
-                            width: 3,
-                          ),
+                          border: Border.all(color: kGold, width: 3),
                           boxShadow: [
                             BoxShadow(
                               color: kGold.withOpacity(0.2),
@@ -316,10 +270,9 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 12),
                       const Text(
-                        kEslogan,
+                        kSlogan,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: kGoldLight,
+                        style: TextStyle(                          color: kGoldLight,
                           fontSize: 13,
                           height: 1.5,
                         ),
@@ -374,23 +327,23 @@ class _LoginPageState extends State<LoginPage> {
                               controller: _passwordController,
                               label: 'Contraseña',
                               icono: Icons.lock_outline_rounded,
-                              oculto: !_verClave,
+                              oculto: !_passwordVisible,
                               sufijo: IconButton(
-                                tooltip: _verClave
+                                tooltip: _passwordVisible
                                     ? 'Ocultar contraseña'
                                     : 'Mostrar contraseña',
                                 icon: Icon(
-                                  _verClave
+                                  _passwordVisible
                                       ? Icons.visibility_off_rounded
                                       : Icons.visibility_rounded,
                                 ),
                                 onPressed: () {
                                   setState(() {
-                                    _verClave = !_verClave;
+                                    _passwordVisible = !_passwordVisible;
                                   });
                                 },
                               ),
-                              alEnviar: _ingresar,
+                              alEnviar: _signIn,
                             ),
                             if (_error.isNotEmpty) ...[
                               const SizedBox(height: 14),
@@ -418,7 +371,7 @@ class _LoginPageState extends State<LoginPage> {
                               width: double.infinity,
                               height: 52,
                               child: FilledButton(
-                                onPressed: _cargando ? null : _ingresar,
+                                onPressed: _loading ? null : _signIn,
                                 style: FilledButton.styleFrom(
                                   backgroundColor: kGold,
                                   foregroundColor: kNavy,
@@ -426,7 +379,7 @@ class _LoginPageState extends State<LoginPage> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                 ),
-                                child: _cargando
+                                child: _loading
                                     ? const SizedBox(
                                         width: 23,
                                         height: 23,
@@ -475,10 +428,7 @@ class _LoginPageState extends State<LoginPage> {
             bottom: 0,
             left: 0,
             right: 0,
-            child: ColoredBox(
-              color: kGold,
-              child: SizedBox(height: 3),
-            ),
+            child: ColoredBox(color: kGold, child: SizedBox(height: 3)),
           ),
         ],
       ),
@@ -513,13 +463,9 @@ class _CampoTexto extends StatelessWidget {
       controller: controller,
       obscureText: oculto,
       keyboardType: teclado,
-      textInputAction:
-          oculto ? TextInputAction.done : TextInputAction.next,
+      textInputAction: oculto ? TextInputAction.done : TextInputAction.next,
       onSubmitted: oculto ? (_) => alEnviar?.call() : null,
-      style: const TextStyle(
-        color: kTextDark,
-        fontSize: 14,
-      ),
+      style: const TextStyle(color: kTextDark, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icono, color: kNavy),
@@ -532,16 +478,11 @@ class _CampoTexto extends StatelessWidget {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: Color(0xFFDDE3EE),
-          ),
+          borderSide: const BorderSide(color: Color(0xFFDDE3EE)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: kNavy,
-            width: 1.5,
-          ),
+          borderSide: const BorderSide(color: kNavy, width: 1.5),
         ),
       ),
     );
@@ -553,8 +494,7 @@ class _CampoTexto extends StatelessWidget {
 class _DotPatternPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.06);
+    final paint = Paint()..color = Colors.white.withOpacity(0.06);
 
     const gap = 24.0;
 
@@ -571,10 +511,10 @@ class _DotPatternPainter extends CustomPainter {
 
 // ───────────── MENÚ PRINCIPAL ─────────────
 
-class PantallaPrincipal extends StatelessWidget {
-  const PantallaPrincipal({super.key});
+class MainDashboard extends StatelessWidget {
+  const MainDashboard({super.key});
 
-  String get _saludo {
+  String get _greeting {
     final hora = DateTime.now().hour;
 
     if (hora < 12) return 'Buenos días';
@@ -582,7 +522,7 @@ class PantallaPrincipal extends StatelessWidget {
     return 'Buenas noches';
   }
 
-  Future<void> _cerrarSesion(BuildContext context) async {
+  Future<void> _signOut(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
 
     if (!context.mounted) return;
@@ -596,47 +536,47 @@ class PantallaPrincipal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final usuario = context.watch<UsuarioProvider>();
-    final esAdmin = usuario.isAdmin;
-    final username = usuario.email;
+    final user = context.watch<UserProvider>();
+    final isAdmin = user.isAdmin;
+    final userName = user.email;
 
-    final modulos = <_ModuloInfo>[
-      if (esAdmin)
-        _ModuloInfo(
-          titulo: 'Vehículos',
-          descripcion: 'Registro y control de la flota',
-          icono: Icons.directions_car_rounded,
+    final modules = <_ModuleInfo>[
+      if (isAdmin)
+        _ModuleInfo(
+          title: 'Vehículos',
+          description: 'Registro y control de la flota',
+          icon: Icons.directions_car_rounded,
           color: const Color(0xFF2864C5),
-          pagina: VehiculosPage(),
+          page: VehiclesPage(),
         ),
-      _ModuloInfo(
-        titulo: 'Combustible',
-        descripcion: 'Cargas, consumo y costos',
-        icono: Icons.local_gas_station_rounded,
+      _ModuleInfo(
+        title: 'Combustible',
+        description: 'Cargas, consumo y costos',
+        icon: Icons.local_gas_station_rounded,
         color: const Color(0xFF16805A),
-        pagina: CombustiblePage(),
+        page: FuelPage(),
       ),
-      _ModuloInfo(
-        titulo: 'Recorridos',
-        descripcion: 'Salidas, destinos y kilometraje',
-        icono: Icons.route_rounded,
+      _ModuleInfo(
+        title: 'Recorridos',
+        description: 'Salidas, destinos y kilometraje',
+        icon: Icons.route_rounded,
         color: const Color(0xFFB56A18),
-        pagina: RecorridosPage(),
+        page: TripsPage(),
       ),
-      _ModuloInfo(
-        titulo: 'Mantenimiento',
-        descripcion: 'Servicios, averías y alertas',
-        icono: Icons.build_circle_rounded,
+      _ModuleInfo(
+        title: 'Mantenimiento',
+        description: 'Servicios, averías y alertas',
+        icon: Icons.build_circle_rounded,
         color: const Color(0xFF7851B8),
-        pagina: MantenimientoPage(),
+        page: MaintenancePage(),
       ),
-      if (esAdmin)
-        _ModuloInfo(
-          titulo: 'Estadísticas',
-          descripcion: 'Indicadores y reportes de la flota',
-          icono: Icons.query_stats_rounded,
+      if (isAdmin)
+        _ModuleInfo(
+          title: 'Estadísticas',
+          description: 'Indicadores y reportes de la flota',
+          icon: Icons.query_stats_rounded,
           color: const Color(0xFF147D9B),
-          pagina: EstadisticasPage(),
+          page: StatisticsPage(),
         ),
     ];
 
@@ -671,10 +611,8 @@ class PantallaPrincipal extends StatelessWidget {
                 child: Image.asset(
                   'assets/logo.png',
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const Icon(
-                    Icons.directions_car_rounded,
-                    color: kNavy,
-                  ),
+                  errorBuilder: (_, __, ___) =>
+                      const Icon(Icons.directions_car_rounded, color: kNavy),
                 ),
               ),
             ),
@@ -710,7 +648,7 @@ class PantallaPrincipal extends StatelessWidget {
         actions: [
           IconButton(
             tooltip: 'Cerrar sesión',
-            onPressed: () => _cerrarSesion(context),
+            onPressed: () => _signOut(context),
             icon: const Icon(Icons.logout_rounded),
           ),
           const SizedBox(width: 5),
@@ -726,11 +664,7 @@ class PantallaPrincipal extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  kNavy,
-                  Color(0xFF173A69),
-                  Color(0xFF214A7D),
-                ],
+                colors: [kNavy, Color(0xFF173A69), Color(0xFF214A7D)],
               ),
               borderRadius: BorderRadius.only(
                 bottomLeft: Radius.circular(25),
@@ -756,7 +690,7 @@ class PantallaPrincipal extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '$_saludo,',
+                            '$_greeting,',
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 13,
@@ -764,7 +698,7 @@ class PantallaPrincipal extends StatelessWidget {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            username,
+                            userName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -782,12 +716,12 @@ class PantallaPrincipal extends StatelessWidget {
                         vertical: 7,
                       ),
                       decoration: BoxDecoration(
-                        color: esAdmin
+                        color: isAdmin
                             ? kGold.withOpacity(0.18)
                             : Colors.white.withOpacity(0.10),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: esAdmin
+                          color: isAdmin
                               ? kGold.withOpacity(0.7)
                               : Colors.white24,
                         ),
@@ -796,17 +730,17 @@ class PantallaPrincipal extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            esAdmin
+                            isAdmin
                                 ? Icons.admin_panel_settings_rounded
                                 : Icons.person_outline_rounded,
-                            color: esAdmin ? kGoldLight : Colors.white,
+                            color: isAdmin ? kGoldLight : Colors.white,
                             size: 16,
                           ),
                           const SizedBox(width: 5),
                           Text(
-                            esAdmin ? 'Administrador' : 'Conductor',
+                            isAdmin ? 'Administrador' : 'Conductor',
                             style: TextStyle(
-                              color: esAdmin ? kGoldLight : Colors.white,
+                              color: isAdmin ? kGoldLight : Colors.white,
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                             ),
@@ -818,7 +752,7 @@ class PantallaPrincipal extends StatelessWidget {
                 ),
                 const SizedBox(height: 19),
                 const Text(
-                  kEslogan,
+                  kSlogan,
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 13,
@@ -848,13 +782,10 @@ class PantallaPrincipal extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        esAdmin
+                        isAdmin
                             ? 'Administra y supervisa la flota'
                             : 'Selecciona la operación que necesitas',
-                        style: const TextStyle(
-                          color: kTextMuted,
-                          fontSize: 12,
-                        ),
+                        style: const TextStyle(color: kTextMuted, fontSize: 12),
                       ),
                     ],
                   ),
@@ -870,7 +801,7 @@ class PantallaPrincipal extends StatelessWidget {
                     border: Border.all(color: const Color(0xFFE0E6F0)),
                   ),
                   child: Text(
-                    '${modulos.length} módulos',
+                    '${modules.length} módulos',
                     style: const TextStyle(
                       color: kNavy,
                       fontSize: 11,
@@ -891,16 +822,16 @@ class PantallaPrincipal extends StatelessWidget {
                 final columnas = ancho >= 1050
                     ? 4
                     : ancho >= 700
-                        ? 3
-                        : ancho >= 430
-                            ? 2
-                            : 1;
+                    ? 3
+                    : ancho >= 430
+                    ? 2
+                    : 1;
 
                 final proporcion = columnas == 1 ? 2.15 : 1.05;
 
                 return GridView.builder(
                   padding: const EdgeInsets.fromLTRB(18, 4, 18, 22),
-                  itemCount: modulos.length,
+                  itemCount: modules.length,
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: columnas,
                     childAspectRatio: proporcion,
@@ -908,16 +839,14 @@ class PantallaPrincipal extends StatelessWidget {
                     mainAxisSpacing: 14,
                   ),
                   itemBuilder: (context, index) {
-                    final modulo = modulos[index];
+                    final module = modules[index];
 
-                    return _ModuloCard(
-                      modulo: modulo,
+                    return _ModuleCard(
+                      modulo: module,
                       onTap: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => modulo.pagina,
-                          ),
+                          MaterialPageRoute(builder: (_) => module.page),
                         );
                       },
                     );
@@ -933,12 +862,7 @@ class PantallaPrincipal extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 13, 12, 15),
             decoration: const BoxDecoration(
               color: kNavy,
-              border: Border(
-                top: BorderSide(
-                  color: kGold,
-                  width: 2,
-                ),
-              ),
+              border: Border(top: BorderSide(color: kGold, width: 2)),
             ),
             child: const SafeArea(
               top: false,
@@ -976,33 +900,29 @@ class PantallaPrincipal extends StatelessWidget {
 
 // ───────────── DATOS DE CADA MÓDULO ─────────────
 
-class _ModuloInfo {
-  final String titulo;
-  final String descripcion;
-  final IconData icono;
+class _ModuleInfo {
+  final String title;
+  final String description;
+  final IconData icon;
   final Color color;
-  final Widget pagina;
+  final Widget page;
 
-  const _ModuloInfo({
-    required this.titulo,
-    required this.descripcion,
-    required this.icono,
+  const _ModuleInfo({
+    required this.title,
+    required this.description,
+    required this.icon,
     required this.color,
-    required this.pagina,
+    required this.page,
   });
 }
 
 // ───────────── TARJETA DEL MENÚ ─────────────
 
-class _ModuloCard extends StatelessWidget {
-  final _ModuloInfo modulo;
+class _ModuleCard extends StatelessWidget {
+  final _ModuleInfo modulo;
   final VoidCallback onTap;
 
-  const _ModuloCard({
-    super.key,
-    required this.modulo,
-    required this.onTap,
-  });
+  const _ModuleCard({super.key, required this.modulo, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1016,9 +936,7 @@ class _ModuloCard extends StatelessWidget {
           padding: const EdgeInsets.all(17),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(19),
-            border: Border.all(
-              color: const Color(0xFFE2E8F2),
-            ),
+            border: Border.all(color: const Color(0xFFE2E8F2)),
             boxShadow: [
               BoxShadow(
                 color: kNavy.withOpacity(0.045),
@@ -1039,11 +957,7 @@ class _ModuloCard extends StatelessWidget {
                       color: modulo.color.withOpacity(0.10),
                       borderRadius: BorderRadius.circular(15),
                     ),
-                    child: Icon(
-                      modulo.icono,
-                      color: modulo.color,
-                      size: 28,
-                    ),
+                    child: Icon(modulo.icon, color: modulo.color, size: 28),
                   ),
                   const Spacer(),
                   Icon(
@@ -1055,7 +969,7 @@ class _ModuloCard extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                modulo.titulo,
+                modulo.title,
                 style: const TextStyle(
                   color: kTextDark,
                   fontSize: 16,
@@ -1064,7 +978,7 @@ class _ModuloCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                modulo.descripcion,
+                modulo.description,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -1089,7 +1003,3 @@ class _ModuloCard extends StatelessWidget {
     );
   }
 }
-
-
-
-

@@ -7,31 +7,31 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:provider/provider.dart';
 
-class VehiculosPage extends StatefulWidget {
-  const VehiculosPage({super.key});
+class VehiclesPage extends StatefulWidget {
+  const VehiclesPage({super.key});
 
   @override
-  State<VehiculosPage> createState() => _VehiculosPageState();
+  State<VehiclesPage> createState() => _VehiclesPageState();
 }
 
-class _VehiculosPageState extends State<VehiculosPage> {
-  final _placaController = TextEditingController();
-  final _marcaController = TextEditingController();
-  final _modeloController = TextEditingController();
+class _VehiclesPageState extends State<VehiclesPage> {
+  final _plateController = TextEditingController();
+  final _brandController = TextEditingController();
+  final _modelController = TextEditingController();
   final _colorController = TextEditingController();
-  final _kmController = TextEditingController();
-  final _kmMantenimientoController = TextEditingController();
+  final _mileageController = TextEditingController();
+  final _maintenanceMileageController = TextEditingController();
 
-  Uint8List? _imagenBytes;
-  File? _imagenFile;
-  bool _subiendoImagen = false;
-  String? _errorMensaje;
+  Uint8List? _imageBytes;
+  File? _imageFile;
+  bool _uploadingImage = false;
+  String? _errorMessage;
 
   // ✅ Función mejorada para subir imagen
-  Future<String?> _subirImagen(String placa) async {
-    if (_imagenBytes == null && _imagenFile == null) return null;
+  Future<String?> _uploadImage(String placa) async {
+    if (_imageBytes == null && _imageFile == null) return null;
 
-    setState(() => _subiendoImagen = true);
+    setState(() => _uploadingImage = true);
 
     try {
       // Crear nombre único para evitar caché
@@ -41,10 +41,10 @@ class _VehiculosPageState extends State<VehiculosPage> {
       );
 
       // Subir según el tipo de imagen
-      if (_imagenBytes != null) {
-        await ref.putData(_imagenBytes!);
-      } else if (_imagenFile != null) {
-        await ref.putFile(_imagenFile!);
+      if (_imageBytes != null) {
+        await ref.putData(_imageBytes!);
+      } else if (_imageFile != null) {
+        await ref.putFile(_imageFile!);
       }
 
       final url = await ref.getDownloadURL();
@@ -52,15 +52,15 @@ class _VehiculosPageState extends State<VehiculosPage> {
       return url;
     } catch (e) {
       print(' Error al subir imagen: $e');
-      _mostrarSnackbar('Error al subir imagen: $e');
+      _showSnackbar('Error al subir imagen: $e');
       return null;
     } finally {
-      setState(() => _subiendoImagen = false);
+      setState(() => _uploadingImage = false);
     }
   }
 
   // ✅ Función para seleccionar imagen (múltiples fuentes)
-  Future<void> _seleccionarImagen(StateSetter setStateDialog) async {
+  Future<void> _pickImage(StateSetter setStateDialog) async {
     showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(
@@ -80,8 +80,8 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 if (imagen != null) {
                   final bytes = await imagen.readAsBytes();
                   setStateDialog(() {
-                    _imagenBytes = bytes;
-                    _imagenFile = File(imagen.path);
+                    _imageBytes = bytes;
+                    _imageFile = File(imagen.path);
                   });
                 }
               },
@@ -99,8 +99,8 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 if (imagen != null) {
                   final bytes = await imagen.readAsBytes();
                   setStateDialog(() {
-                    _imagenBytes = bytes;
-                    _imagenFile = File(imagen.path);
+                    _imageBytes = bytes;
+                    _imageFile = File(imagen.path);
                   });
                 }
               },
@@ -111,8 +111,8 @@ class _VehiculosPageState extends State<VehiculosPage> {
               onTap: () {
                 Navigator.pop(context);
                 setStateDialog(() {
-                  _imagenBytes = null;
-                  _imagenFile = null;
+                  _imageBytes = null;
+                  _imageFile = null;
                 });
               },
             ),
@@ -123,46 +123,46 @@ class _VehiculosPageState extends State<VehiculosPage> {
   }
 
   // ✅ Validar formulario
-  bool _validarFormulario() {
-    if (_placaController.text.trim().isEmpty) {
-      _mostrarSnackbar('Ingrese la placa del vehículo');
+  bool _validateForm() {
+    if (_plateController.text.trim().isEmpty) {
+      _showSnackbar('Ingrese la placa del vehículo');
       return false;
     }
-    if (_marcaController.text.trim().isEmpty) {
-      _mostrarSnackbar('Ingrese la marca del vehículo');
+    if (_brandController.text.trim().isEmpty) {
+      _showSnackbar('Ingrese la marca del vehículo');
       return false;
     }
-    if (_modeloController.text.trim().isEmpty) {
-      _mostrarSnackbar('Ingrese el modelo del vehículo');
+    if (_modelController.text.trim().isEmpty) {
+      _showSnackbar('Ingrese el modelo del vehículo');
       return false;
     }
-    if (_kmController.text.trim().isEmpty) {
-      _mostrarSnackbar('Ingrese el kilometraje actual');
+    if (_mileageController.text.trim().isEmpty) {
+      _showSnackbar('Ingrese el kilometraje actual');
       return false;
     }
     return true;
   }
 
   // ✅ Mostrar snackbar
-  void _mostrarSnackbar(String mensaje) {
+  void _showSnackbar(String mensaje) {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(mensaje)));
   }
 
   // ✅ Formulario mejorado
-  void _mostrarFormulario({Map<String, dynamic>? vehiculo, String? docId}) {
+  void _showForm({Map<String, dynamic>? vehiculo, String? docId}) {
     // Si es edición, cargar datos
     if (vehiculo != null) {
-      _placaController.text = vehiculo['placa'] ?? '';
-      _marcaController.text = vehiculo['marca'] ?? '';
-      _modeloController.text = vehiculo['modelo'] ?? '';
+      _plateController.text = vehiculo['placa'] ?? '';
+      _brandController.text = vehiculo['marca'] ?? '';
+      _modelController.text = vehiculo['modelo'] ?? '';
       _colorController.text = vehiculo['color'] ?? '';
-      _kmController.text = (vehiculo['kilometraje'] ?? 0).toString();
-      _kmMantenimientoController.text = (vehiculo['km_mantenimiento'] ?? 0)
+      _mileageController.text = (vehiculo['kilometraje'] ?? 0).toString();
+      _maintenanceMileageController.text = (vehiculo['km_mantenimiento'] ?? 0)
           .toString();
     } else {
-      _limpiarFormulario();
+      _clearForm();
     }
 
     showDialog(
@@ -185,11 +185,11 @@ class _VehiculosPageState extends State<VehiculosPage> {
                     color: Colors.grey[200],
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: _imagenBytes != null
+                  child: _imageBytes != null
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.memory(
-                            _imagenBytes!,
+                            _imageBytes!,
                             width: 120,
                             height: 120,
                             fit: BoxFit.cover,
@@ -235,7 +235,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
                     backgroundColor: const Color(0xFF003580),
                     foregroundColor: Colors.white,
                   ),
-                  onPressed: () => _seleccionarImagen(setStateDialog),
+                  onPressed: () => _pickImage(setStateDialog),
                   icon: const Icon(Icons.photo),
                   label: const Text('Seleccionar foto'),
                 ),
@@ -244,7 +244,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
 
                 // Campos del formulario
                 TextField(
-                  controller: _placaController,
+                  controller: _plateController,
                   decoration: const InputDecoration(
                     labelText: 'Placa *',
                     border: OutlineInputBorder(),
@@ -255,7 +255,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 const SizedBox(height: 12),
 
                 TextField(
-                  controller: _marcaController,
+                  controller: _brandController,
                   decoration: const InputDecoration(
                     labelText: 'Marca *',
                     border: OutlineInputBorder(),
@@ -265,7 +265,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 const SizedBox(height: 12),
 
                 TextField(
-                  controller: _modeloController,
+                  controller: _modelController,
                   decoration: const InputDecoration(
                     labelText: 'Modelo *',
                     border: OutlineInputBorder(),
@@ -285,7 +285,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 const SizedBox(height: 12),
 
                 TextField(
-                  controller: _kmController,
+                  controller: _mileageController,
                   decoration: const InputDecoration(
                     labelText: 'Kilometraje actual *',
                     border: OutlineInputBorder(),
@@ -296,7 +296,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 const SizedBox(height: 12),
 
                 TextField(
-                  controller: _kmMantenimientoController,
+                  controller: _maintenanceMileageController,
                   decoration: const InputDecoration(
                     labelText: 'Km próximo mantenimiento',
                     border: OutlineInputBorder(),
@@ -310,7 +310,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
           actions: [
             TextButton(
               onPressed: () {
-                _limpiarFormulario();
+                _clearForm();
                 Navigator.pop(context);
               },
               child: const Text('Cancelar'),
@@ -320,21 +320,21 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 backgroundColor: const Color(0xFF003580),
                 foregroundColor: Colors.white,
               ),
-              onPressed: _subiendoImagen
+              onPressed: _uploadingImage
                   ? null
                   : () async {
-                      if (!_validarFormulario()) return;
+                      if (!_validateForm()) return;
 
-                      setStateDialog(() => _subiendoImagen = true);
+                      setStateDialog(() => _uploadingImage = true);
 
                       try {
-                        final placa = _placaController.text
+                        final placa = _plateController.text
                             .trim()
                             .toUpperCase();
 
                         String? fotoUrl;
-                        if (_imagenBytes != null || _imagenFile != null) {
-                          fotoUrl = await _subirImagen(placa);
+                        if (_imageBytes != null || _imageFile != null) {
+                          fotoUrl = await _uploadImage(placa);
                         } else if (vehiculo != null &&
                             vehiculo['foto_url'] != null) {
                           fotoUrl =
@@ -343,12 +343,15 @@ class _VehiculosPageState extends State<VehiculosPage> {
 
                         final data = {
                           'placa': placa,
-                          'marca': _marcaController.text.trim(),
-                          'modelo': _modeloController.text.trim(),
+                          'marca': _brandController.text.trim(),
+                          'modelo': _modelController.text.trim(),
                           'color': _colorController.text.trim(),
-                          'kilometraje': int.tryParse(_kmController.text) ?? 0,
+                          'kilometraje':
+                              int.tryParse(_mileageController.text) ?? 0,
                           'km_mantenimiento':
-                              int.tryParse(_kmMantenimientoController.text) ??
+                              int.tryParse(
+                                _maintenanceMileageController.text,
+                              ) ??
                               0,
                           'foto_url': fotoUrl ?? '',
                           'fecha_actualizacion': DateTime.now(),
@@ -360,7 +363,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
                               .collection('vehiculos')
                               .doc(docId)
                               .update(data);
-                          _mostrarSnackbar('Vehículo actualizado');
+                          _showSnackbar('Vehículo actualizado');
                         } else {
                           // Nuevo vehículo
                           data['fecha_registro'] = DateTime.now();
@@ -368,18 +371,18 @@ class _VehiculosPageState extends State<VehiculosPage> {
                           await FirebaseFirestore.instance
                               .collection('vehiculos')
                               .add(data);
-                          _mostrarSnackbar('Vehículo agregado');
+                          _showSnackbar('Vehículo agregado');
                         }
 
-                        _limpiarFormulario();
+                        _clearForm();
                         if (context.mounted) Navigator.pop(context);
                       } catch (e) {
-                        _mostrarSnackbar('Error: $e');
+                        _showSnackbar('Error: $e');
                       } finally {
-                        setStateDialog(() => _subiendoImagen = false);
+                        setStateDialog(() => _uploadingImage = false);
                       }
                     },
-              child: _subiendoImagen
+              child: _uploadingImage
                   ? const SizedBox(
                       width: 20,
                       height: 20,
@@ -436,23 +439,23 @@ class _VehiculosPageState extends State<VehiculosPage> {
             .collection('vehiculos')
             .doc(docId)
             .delete();
-        _mostrarSnackbar('Vehículo eliminado');
+        _showSnackbar('Vehículo eliminado');
       } catch (e) {
-        _mostrarSnackbar('Error al eliminar: $e');
+        _showSnackbar('Error al eliminar: $e');
       }
     }
   }
 
-  void _limpiarFormulario() {
-    _placaController.clear();
-    _marcaController.clear();
-    _modeloController.clear();
+  void _clearForm() {
+    _plateController.clear();
+    _brandController.clear();
+    _modelController.clear();
     _colorController.clear();
-    _kmController.clear();
-    _kmMantenimientoController.clear();
-    _imagenBytes = null;
-    _imagenFile = null;
-    _errorMensaje = null;
+    _mileageController.clear();
+    _maintenanceMileageController.clear();
+    _imageBytes = null;
+    _imageFile = null;
+    _errorMessage = null;
   }
 
   // ✅ Widget para mostrar estado del mantenimiento
@@ -480,24 +483,20 @@ class _VehiculosPageState extends State<VehiculosPage> {
 
   @override
   Widget build(BuildContext context) {
-
-
-
-    final usuarioProvider = Provider.of<UsuarioProvider>(context);
-
+    final userProvider = Provider.of<UserProvider>(context);
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF003580),
         title: Text(
-          'Vehículos /${usuarioProvider.email} es admin? ${usuarioProvider.isAdmin}',
+          'Vehículos /${userProvider.email} es admin? ${userProvider.isAdmin}',
           style: TextStyle(color: Colors.white),
         ),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFF003580),
-        onPressed: () => _mostrarFormulario(),
+        onPressed: () => _showForm(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -555,7 +554,7 @@ class _VehiculosPageState extends State<VehiculosPage> {
                 child: InkWell(
                   onTap: () {
                     // Ver detalles (puedes mostrar más info)
-                    _mostrarFormulario(vehiculo: v, docId: doc.id);
+                    _showForm(vehiculo: v, docId: doc.id);
                   },
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
@@ -644,12 +643,12 @@ class _VehiculosPageState extends State<VehiculosPage> {
 
   @override
   void dispose() {
-    _placaController.dispose();
-    _marcaController.dispose();
-    _modeloController.dispose();
+    _plateController.dispose();
+    _brandController.dispose();
+    _modelController.dispose();
     _colorController.dispose();
-    _kmController.dispose();
-    _kmMantenimientoController.dispose();
+    _mileageController.dispose();
+    _maintenanceMileageController.dispose();
     super.dispose();
   }
 }

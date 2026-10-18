@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-class UsuarioProvider with ChangeNotifier {
+class UserProvider with ChangeNotifier {
   String _email = '';
   bool _isAdmin = false;
 
@@ -9,14 +9,14 @@ class UsuarioProvider with ChangeNotifier {
   bool get isAdmin => _isAdmin;
 
   // Setters (para actualizar)
-  void setUsuario(String email, bool isAdmin) {
+  void setUser(String email, bool isAdmin) {
     _email = email;
     _isAdmin = isAdmin;
-    
+
     notifyListeners();
   }
 
-  void limpiar() {
+  void clear() {
     _email = '';
     _isAdmin = false;
     notifyListeners();
