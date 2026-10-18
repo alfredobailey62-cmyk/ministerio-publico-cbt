@@ -153,6 +153,7 @@ class _LoginPageState extends State<LoginPage> {
         MaterialPageRoute(builder: (_) => const MainDashboard()),
       );
     } on FirebaseAuthException catch (error) {
+      debugPrint('AUTH ERROR: ${error.code} - ${error.message}');
       if (error.code == 'network-request-failed') {
         setState(() => _error = 'Compruebe su conexión a internet.');
       } else if (error.code == 'user-not-found' ||
@@ -320,7 +321,7 @@ class _LoginPageState extends State<LoginPage> {
                               controller: _emailController,
                               label: 'Usuario o correo',
                               icono: Icons.person_outline_rounded,
-                              teclado: TextInputType.emailAddress,
+                              teclado: TextInputType.text,
                             ),
                             const SizedBox(height: 16),
                             _CampoTexto(
@@ -463,6 +464,9 @@ class _CampoTexto extends StatelessWidget {
       controller: controller,
       obscureText: oculto,
       keyboardType: teclado,
+      autocorrect: false,
+      enableSuggestions: false,
+      textCapitalization: TextCapitalization.none,
       textInputAction: oculto ? TextInputAction.done : TextInputAction.next,
       onSubmitted: oculto ? (_) => alEnviar?.call() : null,
       style: const TextStyle(color: kTextDark, fontSize: 14),

@@ -52,7 +52,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyCd8EiZW19_KB4uKaWqVgObPc6mJj6kKis',
-    appId: '1:166195661856:android:5e22920ffaf36f32730045',
+    appId: '1:166195661856:android:095a80e386532247730045',
     messagingSenderId: '166195661856',
     projectId: 'ministerio-publico-cbt',
     storageBucket: 'ministerio-publico-cbt.firebasestorage.app',
